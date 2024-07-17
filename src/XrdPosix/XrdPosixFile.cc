@@ -584,6 +584,10 @@ int XrdPosixFile::Read (char *Buff, long long Offs, int Len)
    Status = clFile.Read((uint64_t)Offs, (uint32_t)Len, Buff, bytes);
    unRef();
 
+   if (!Status.IsOK()) {
+     printf("Got error from Server while read: %d %s\n", Status.status, Status.pMessage);
+   }
+
    return (Status.IsOK() ? (int)bytes : XrdPosixMap::Result(Status, false));
 }
   
@@ -611,7 +615,9 @@ void XrdPosixFile::Read (XrdOucCacheIOCB &iocb, char *buff, long long offs,
 // Check status
 //
    if (!Status.IsOK())
-      {rhP->Sched(XrdPosixMap::Result(Status, false));
+      {
+       printf("Got error from Server while read: %d %s\n", Status.status, Status.pMessage);
+       rhP->Sched(XrdPosixMap::Result(Status, false));
        unRef();
       }
 }
@@ -643,6 +649,9 @@ int XrdPosixFile::ReadV (const XrdOucIOVec *readV, int n)
 //
    Ref();
    Status = clFile.VectorRead(chunkVec, (void *)0, vrInfo);
+   if (!Status.IsOK()) {
+     printf("Got error from Server while readv: %d %s\n", Status.status, Status.pMessage);
+   }
    unRef();
    delete vrInfo;
 
