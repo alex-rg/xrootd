@@ -615,9 +615,9 @@ void File::RequestBlocksDirect(IO *io, DirectResponseHandler *handler, std::vect
     * Read requests do not respect ReadV max_ior limit, so to avoid erros it should not
     * be forwarded as ReadV. */
    if (iovec_sz == 1) {
-     io->GetInput()->Read( *handler, ioVec[0].data, ioVec[0].offset,  ioVec[0].size);
+     io->GetInput()->Read(*handler, ioVec[0].data, ioVec[0].offset, ioVec[0].size);
    } else {
-     io->GetInput()->ReadV( *handler, ioVec.data(), (int) ioVec.size());
+     io->GetInput()->ReadV(*handler, ioVec.data(), iovec_sz);
    }
 }
 
