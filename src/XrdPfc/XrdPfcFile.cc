@@ -820,7 +820,7 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
 	    // Emulate  lack of RAM in 50% cases. For testing only!
             Block *b = 0;
 	    int rnd_fl = (int)rand();
-	    if (i % 2 == 0)
+	    if (rnd_fl % 2 == 0)
 	    {
                 b = PrepareBlockRequest(block_idx, io, read_req, false);
 	    }
