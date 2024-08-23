@@ -817,7 +817,14 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
                read_req = new ReadRequest(io, rh);
 
             // Is there room for one more RAM Block?
-            Block *b = PrepareBlockRequest(block_idx, io, read_req, false);
+	    // Emulate  lack of RAM in 50% cases. For testing only!
+            Block *b = 0;
+	    int rnd_fl = (int)rand();
+	    if (i % 2 == 0)
+	    {
+                b = PrepareBlockRequest(block_idx, io, read_req, false);
+	    }
+
             if (b)
             {
                TRACEF(Dump, tpfx << "inc_ref_count new " <<  (void*)iUserBuff << " idx = " << block_idx);
