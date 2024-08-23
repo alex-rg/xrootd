@@ -372,6 +372,7 @@ static int   xlimit(XrdOucStream &Config);
 
 static XrdObjectQ<XrdXrootdProtocol> ProtStack;
 XrdObject<XrdXrootdProtocol>         ProtLink;
+static int                 maxReadv_ior; // Maximum readv element length
 
 protected:
 
@@ -471,7 +472,6 @@ static char   tlsNot;    // TLS requirements for incapable clients
 //
 static int                 maxBuffsz;    // Maximum buffer size we can have
 static int                 maxTransz;    // Maximum transfer size we can have
-static int                 maxReadv_ior; // Maximum readv element length
 
 // Statistical area
 //
