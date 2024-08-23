@@ -762,8 +762,10 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
 
          overlap(block_idx, m_block_size, iUserOff, iUserSize, off, blk_off, size);
 
+	 int force_direct = ((int) rand()) % 2;
+
          // In RAM or incoming?
-         if (bi != m_block_map.end())
+         if (bi != m_block_map.end() && (!force_direct))
          {
             inc_ref_count(bi->second);
             TRACEF(Dump, tpfx << (void*) iUserBuff << " inc_ref_count for existing block " << bi->second << " idx = " <<  block_idx);
@@ -794,7 +796,7 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
             lbe = LB_other;
          }
          // On disk?
-         else if (m_cfi.TestBitWritten(offsetIdx(block_idx)))
+         else if (m_cfi.TestBitWritten(offsetIdx(block_idx)) && (!force_direct))
          {
             TRACEF(DumpXL, tpfx << "read from disk " <<  (void*)iUserBuff << " idx = " << block_idx);
 
@@ -817,7 +819,7 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
 
             // Is there room for one more RAM Block?
             Block *b = PrepareBlockRequest(block_idx, io, read_req, false);
-            if (b)
+            if (b && (!force_direct))
             {
                TRACEF(Dump, tpfx << "inc_ref_count new " <<  (void*)iUserBuff << " idx = " << block_idx);
                inc_ref_count(b);
