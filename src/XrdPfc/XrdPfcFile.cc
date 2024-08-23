@@ -32,6 +32,7 @@
 #include "XrdOss/XrdOss.hh"
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdSfs/XrdSfsInterface.hh"
+#include "XrdXrootd/XrdXrootdProtocol.hh"
 #include "XrdPfc.hh"
 
 
@@ -838,16 +839,16 @@ int File::ReadOpusCoalescere(IO *io, const XrdOucIOVec *readV, int readVnum,
                // Make sure we do not issue a ReadV with chunk size above XrdProto::maxReadv_ior.
                // Number of actual ReadVs issued so as to not exceed the XrdProto::maxRvecsz limit
                // is determined in the RequestBlocksDirect().
-               if (lbe == LB_direct && iovec_direct.back().size + size <= XrdProto::maxReadv_ior) {
+               if (lbe == LB_direct && iovec_direct.back().size + size <= XrdXrootdProtocol::maxReadv_ior) {
                   iovec_direct.back().size += size;
                } else {
                   long long  in_offset = block_idx * m_block_size + blk_off;
                   char      *out_pos   = iUserBuff + off;
-                  while (size > XrdProto::maxReadv_ior) {
-                     iovec_direct.push_back( { in_offset, XrdProto::maxReadv_ior, 0, out_pos } );
-                     in_offset += XrdProto::maxReadv_ior;
-                     out_pos   += XrdProto::maxReadv_ior;
-                     size      -= XrdProto::maxReadv_ior;
+                  while (size > XrdXrootdProtocol::maxReadv_ior) {
+                     iovec_direct.push_back( { in_offset, XrdXrootdProtocol::maxReadv_ior, 0, out_pos } );
+                     in_offset += XrdXrootdProtocol::maxReadv_ior;
+                     out_pos   += XrdXrootdProtocol::maxReadv_ior;
+                     size      -= XrdXrootdProtocol::maxReadv_ior;
                   }
                   iovec_direct.push_back( { in_offset, size, 0, out_pos } );
                }
