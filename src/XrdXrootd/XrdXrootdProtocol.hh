@@ -230,6 +230,8 @@ static bool          as_aioOK;     // aio is enabled
 static bool          as_nosf;      // sendfile is disabled
 static bool          as_syncw;     // writes to be synchronous
 
+static int                 maxReadv_ior; // Maximum readv element length
+
 private:
 
 // Note that Route[] structure (below) must have RD_Num elements!
@@ -372,7 +374,6 @@ static int   xlimit(XrdOucStream &Config);
 
 static XrdObjectQ<XrdXrootdProtocol> ProtStack;
 XrdObject<XrdXrootdProtocol>         ProtLink;
-static int                 maxReadv_ior; // Maximum readv element length
 
 protected:
 
