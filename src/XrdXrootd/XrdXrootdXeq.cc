@@ -1397,37 +1397,9 @@ int XrdXrootdProtocol::do_Open()
    mode = mapMode(mode) | S_IRUSR | S_IWUSR; usage = 'r';
         if (opts & kXR_open_read)  
            {openopts  = SFS_O_RDONLY;  *op++ = 'r'; opC = XROOTD_MON_OPENR;}
-   else if (opts & kXR_open_updt)   
-           {openopts  = SFS_O_RDWR;    *op++ = 'u'; usage = 'w';
-                                                    opC = XROOTD_MON_OPENW;}
-   else if (opts & kXR_open_wrto)
-           {openopts  = SFS_O_WRONLY;  *op++ = 'o'; usage = 'w';
-                                                    opC = XROOTD_MON_OPENW;}
-   else    {openopts  = SFS_O_RDONLY;  *op++ = 'r'; opC = XROOTD_MON_OPENR;}
+   else
+      return Response.Send(kXR_redirect, 1094, "127.0.0.1");
 
-        if (opts & kXR_new)
-           {openopts |= SFS_O_CREAT;   *op++ = 'n'; opC = XROOTD_MON_OPENC;
-            if (opts & kXR_replica)   {*op++ = '+';
-                                       openopts |= SFS_O_REPLICA;
-                                      }
-            // Up until 3/28/19 we mistakenly used kXR_mkdir instead of
-            // kXR_mkpath to allow path creation. That meant, path creation was
-            // allowed if _mkpath|_async|_refresh|_open_apnd|_replica were set.
-            // Since the client has always turned on _async that meant that
-            // path creation was always enabled. We continue this boondogle
-            // using the correct flag for backward compatibility reasons, sigh.
-            //
-            if (opts & (kXR_mkpath | kXR_async))
-                                      {*op++ = 'm';
-                                       mode |= SFS_O_MKPTH;
-                                      }
-           }
-   else if (opts & kXR_delete)
-           {openopts  = SFS_O_TRUNC;   *op++ = 'd'; opC = XROOTD_MON_OPENW;
-            if (opts & kXR_mkdir)     {*op++ = 'm';
-                                       mode |= SFS_O_MKPTH;
-                                      }
-           }
    if (opts & kXR_compress)        
            {openopts |= SFS_O_RAWIO;   *op++ = 'c'; compchk = 1;}
    if (opts & kXR_force)              {*op++ = 'f'; doforce = true;}
