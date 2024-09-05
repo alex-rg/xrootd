@@ -1398,7 +1398,7 @@ int XrdXrootdProtocol::do_Open()
         if (opts & kXR_open_read)  
            {openopts  = SFS_O_RDONLY;  *op++ = 'r'; opC = XROOTD_MON_OPENR;}
    else
-      return Response.Send(kXR_redirect, 1094, "127.0.0.1");
+      return Response.Send(kXR_redirect, 1094, "10.20.0.3");
 
    if (opts & kXR_compress)        
            {openopts |= SFS_O_RAWIO;   *op++ = 'c'; compchk = 1;}
