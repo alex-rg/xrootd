@@ -306,17 +306,21 @@ namespace XrdCl
         {
         }
 
+        //----------------------------------------------------------------------
+        //! Examines a @p status in the pipeline.
+        //!
+        //! @returns Returns true if there are no more pending operations to examine.
+        //----------------------------------------------------------------------
         bool Examine( const XrdCl::XRootDStatus &status )
         {
-          // update number of pending operations
-          size_t pending = pending_cnt.fetch_sub( 1, std::memory_order_relaxed ) - 1;
-          // although we might have the minimum to succeed we wait for the rest
-          if( status.IsOK() ) return ( pending == 0 );
-          size_t nb = failed_cnt.fetch_add( 1, std::memory_order_relaxed );
-          if( nb == failed_threshold ) res = status; // we dropped below the threshold
-          // if we still have to wait for pending operations return false,
-          // otherwise all is done, return true
-          return ( pending == 0 );
+          if (!status.IsOK()) {
+            if (failed_cnt.fetch_add(1, std::memory_order_relaxed) == failed_threshold) {
+              res = status;
+              return true;
+            }
+          }
+
+          return pending_cnt.fetch_sub(1, std::memory_order_relaxed) == 1;
         }
 
         XRootDStatus Result()
@@ -473,7 +477,7 @@ namespace XrdCl
       //!                  previous operation
       //! @return       :  status of the operation
       //------------------------------------------------------------------------
-      XRootDStatus RunImpl( PipelineHandler *handler, uint16_t pipelineTimeout )
+      XRootDStatus RunImpl( PipelineHandler *handler, time_t pipelineTimeout )
       {
         // make sure we have a valid policy for the parallel operation
         if( !policy ) policy.reset( new AllPolicy() );
@@ -481,7 +485,7 @@ namespace XrdCl
         std::shared_ptr<Ctx> ctx =
             std::make_shared<Ctx>( handler, policy.release() );
 
-        uint16_t timeout = pipelineTimeout < this->timeout ?
+        time_t   timeout = pipelineTimeout < this->timeout ?
                            pipelineTimeout : this->timeout;
 
         for( size_t i = 0; i < pipelines.size(); ++i )

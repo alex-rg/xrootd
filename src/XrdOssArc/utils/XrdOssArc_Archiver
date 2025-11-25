@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+import errno
+import os
+import shutil
+import stat
+import subprocess
+import sys
+
+# Check for debugging
+#
+x = os.getenv("XRDOSSARC_DEBUG", None)
+if x is None:
+   Debug = False
+   DKeep = False
+   zipHush = "-q "
+else:
+   Debug = True
+   zipHush = ''
+   DKeep = x > '1' 
+
+# Print to stderr a message
+#
+def Emsg(rc, txt):
+   print("OssArc_Archive: " + txt, file=sys.stderr)
+   if rc:
+      sys.exit(rc)
+
+# Translate zip status code to a message
+#
+def zrc2text(rc):
+   if rc == 0:
+      return ""
+   elif rc == 2:
+      return "unexpected end of zip file."
+   elif rc == 3:
+      return "error in the zipfile format was detected."
+   elif rc == 4:
+      return "unable to allocate memory buffers."
+   elif rc == 5:
+      return "a severe error in the zipfile format was detected."
+   elif rc == 6:
+      return "entry too large to be processed."
+   elif rc == 7:
+      return "invalid comment format."
+   elif rc == 8:
+      return "insufficient memory."
+   elif rc == 9:
+      return "the user aborted zip prematurely with control-C."
+   elif rc == 10:
+      return "zip encountered an error while using a temp file."
+   elif rc == 11:
+      return "read or seek error."
+   elif rc == 12:
+      return "zip has nothing to do."
+   elif rc == 13:
+      return "missing or empty zip file."
+   elif rc == 14:
+      return "error writing to a file."
+   elif rc == 15:
+      return "zip was unable to create a file to write to."
+   elif rc == 16:
+      return "bad command line parameters."
+   elif rc == 18:
+      return "zip could not open a specified file to read."
+   elif rc == 19:
+      return "zip was compiled with unsupported options."
+   else: 
+      return "unknown error " + str(rc) + "."
+
+
+#******************************************************************************
+#*                               a r c D i r s                                *
+#******************************************************************************
+  
+def arcDirs(dsnDir):
+   # Archive sources are placed in subdirectories in the form of ~n where
+   # 'n' is 1,2 ,3, etc. There must be at least one directory, i.e. ~1.
+   #
+   if not os.path.exists(dsnDir+'/~1'):
+      Emsg(8, "Missing archive source directory {}/~1".format(dsnDir))
+
+   # Collect all the appropriate directories that for the archive
+   #
+   dList = []
+   try:
+      for entry in os.scandir(dsnDir):
+         if entry.name.startswith('~') and entry.is_dir():
+            if entry.name[1:].isdigit():
+               dList.append(entry.name[1:])
+   except Exception as e:
+      Emsg(8, "Unable to scan for arc directory in {}: {}".format(dsnDir, e))
+      return None,None
+
+   # Now we must verify that the list is consistent
+   #
+   nList = list(map(int, dList))
+   nList.sort()
+   dList = []
+   wantN = 1
+   for n in nList:
+      if n != wantN:
+         Emsg(8, "Missing arc directory ~{} in path {}".format(wantN,dsnDir))
+         return None, None
+      dList.append('~{}'.format(wantN))
+      wantN = wantN + 1
+
+   # All done, return results
+   #
+   return dList
+
+#******************************************************************************
+#*                               a r c S a v e                                *
+#******************************************************************************
+
+# When called, the current working directory is where the archive resides
+#
+def arcSave(tapDir, arcFN):
+
+   # Construct full destination
+   #
+   arcDst = tapDir + arcFN
+
+   # Remove any existing archive. We ignore errors here
+   #
+   if Debug: Emsg(0, "Removing saved archive '{}'".format(arcDst))
+   try:
+      os.remove(arcDst)
+   except Exception:
+      pass
+
+   # Create the path where the archive file will reside on tape
+   #
+   try:
+      os.makedirs(tapDir, mode=0o775, exist_ok=True)
+   except Exception as e:
+      Emsg(errno.EINVAL,"Unable to make tape path '{}'; {}".format(tapDir,str(e))) 
+
+   # Now copy the archive to the tape buffer
+   #
+   try:
+      if Debug: Emsg(0, "Copying {}/{} to {}".format(os.getcwd(),arcFN,arcDst))
+      shutil.copy2(arcFN, tapDir)
+   except Exception as e:
+      Emsg(errno.EINTR, "Unable to copy {}/{} to {}; {}".format(os.getcwd(),
+                        arcFN, tapDir, str(e)))
+
+  
+#******************************************************************************
+#*                                a r c Z i p                                 *
+#******************************************************************************
+
+# Upon entry the current working directory is set to the subtree from which
+# the archive is to be built (e.g. ~n)/ The actual archive is placed in the
+# parent directory of the source directory.
+#
+def arcZip(arcDir, arcFN):
+
+   # Remove any existing archive. We ignore errors here
+   #
+   if Debug: Emsg(0, "Removing created archive '{}/{}'".format(os.getcwd(), arcFN))
+   
+   try:
+      os.remove(arcFN)
+   except Exception:
+      pass
+
+   # Set current working directory to the tree to be archived
+   #
+   try:
+      os.chdir(arcDir)
+   except Exception as e:
+      Emsg(errno.ENOENT, "Unable to chdir to dataset source at {}/{}; {}".
+            format(os.getcwd(), arcDir, str(e)))
+
+   # Prepare to create the archive
+   #
+   arcCmd = 'zip -r -0 {} ../{} .'.format(zipHush, arcFN)
+
+   if Debug: Emsg(0, "Executing '{}'".format(arcCmd))
+
+   # Create the archive file using gzip
+   #
+   status = os.system(arcCmd)
+   if os.WIFSIGNALED(status):
+      rc = -os.WTERMSIG(status)
+   elif os.WIFEXITED(status):
+      rc = os.WEXITSTATUS(status)
+   elif os.WIFSTOPPED(status):
+      rc = -os.WSTOPSIG(status)
+   if rc != 0:
+      Emsg(errno.EPROTO, "Unable to create archive {}/{}; [rc {}] {}".
+                         format(os.getcwd(), arcFN, str(rc), zrc2text(rc)))
+
+   # Reset the current working directory to what it was at entry.
+   #
+   try:
+      os.chdir('..')
+   except Exception as e:
+      Emsg(errno.ENOENT, "Unable to chdir to dataset archive at {}/..; {}".
+           format(os.getcwd(), str(e)))
+
+   # Mark the archive as complete. We do this by making it read/only
+   #
+   try:
+      os.chmod(arcFN, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+   except Exception as e:
+      Emsg(errno.EINVAL, "Unable to make '{}' r/o; {}".
+           format(os.getcwd(), arcFN, str(e)))
+
+#******************************************************************************
+#*                                  M a i n                                   *
+#******************************************************************************
+  
+# The actual guts of the script
+#
+def Main(argv):
+
+   # Make sure we have atleast four arguments. These would correspond to:
+   #
+   # <dirpath to dsn members> <backing dsn dirpath> <arcfilename> [<copy_cmd>]
+   #
+   if len(argv) < 3: Emsg(errno.EINVAL, "Too few arguments") 
+   
+   # Assign names to the arguments. Note that the dsnDir is atomically unique.
+   # and the arcName is made to reside in the our cwd parent directory.
+   #
+   dsnDir  = argv[0]
+   tapDir  = argv[1]
+   arcName = argv[2]
+
+   # If we have an extra argument then this is the copy command template to
+   # use to backup the data. The command may be null to indicate no command.
+   #
+   if len(argv) > 3 and argv[3]: arcRCP = argv[3]
+   else: arcRCP = None
+
+   # Cleanup the base directories
+   #
+   dsnDir  = dsnDir.rstrip('/') + '/'
+   tapDir  = tapDir.rstrip('/') + '/'
+
+   # Do some debugging
+   #
+   if Debug:
+      Emsg(0, "dsnDir={} tapDir={} arcName={}".format(dsnDir, tapDir, arcName))
+   
+   # Set out working directory to the root of the dataset splits
+   #
+   try:
+      os.chdir(dsnDir)
+   except Exception as e:
+      Emsg(errno.ENOENT, "Unable to cd to {} (dataset source directory); {}"
+                         .format(dsnDir, str(e)))
+
+   # Verify that we can use the target directory
+   #  
+   if (not os.access(dsnDir, os.W_OK)):
+      Emsg(errno.EACCES, "{} not writable (target directory)".format(dsnDir))
+
+   # Get the dataset segments (one or more) that need to be backed up
+   #
+   dList = arcDirs(dsnDir)
+   if Debug: Emsg(0, "Archive source dirctories: {}".format(dList))
+
+   # Develop the archive name
+   #
+   arcName = arcName.lstrip('/')
+   arcnvec = arcName.rsplit('.', 1)
+   arcNfmt = arcnvec[0] + '{}-' + str(len(dList)) + '.' + arcnvec[1]
+   arcList = []
+
+   # Process each segment
+   #
+   for arcDir in dList:
+   
+      # Construct the source and destination paths
+      #
+      arcName = arcNfmt.format(arcDir[1:])
+
+      # Create the archive
+      #
+      arcZip(arcDir, arcName)
+
+      # Save the archive to backup medium if not doing a remote copy
+      #
+      if arcRCP is None: arcSave(tapDir, arcName)
+      else: arcList.append(arcName)
+
+   # If we are saving the archives using a remote script, invoke it.
+   #
+   if arcRCP is not None:
+      arcCMD = [arcRCP,  'save', tapDir] + arcList 
+      if Debug:
+         Emsg(0, "Running: "+' '.join(arcCMD))
+      try:
+         subprocess.run(arcCMD, check=True)
+      except Exception as e:
+          Emsg(8, "Unable to save archive files in {} via {}: {}"
+                          .format(dsnDir, arcRCP, str(e)))
+
+   # We are done
+   #
+   return 0
+
+if __name__ == "__main__":
+   sys.argv.pop(0)
+   sys.exit(Main(sys.argv))

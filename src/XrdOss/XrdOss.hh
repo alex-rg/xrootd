@@ -33,6 +33,7 @@
 #include <dirent.h>
 #include <cerrno>
 #include <cstdint>
+#include <string>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -62,6 +63,7 @@ class XrdSfsAio;
 class XrdOssDF
 {
 public:
+friend class XrdOssArcDF;
 
 /******************************************************************************/
 /*            D i r e c t o r y   O r i e n t e d   M e t h o d s             */
@@ -404,6 +406,8 @@ uint16_t        DFType() {return dfType;}
 //!                                Response: Pointer to XrdOucChkPnt object.
 //!                  Fctl_utimes - Set atime and mtime (no response).
 //!                                Argument: struct timeval tv[2]
+//!                  Fctl_setFD  - Set file descriptor for unopened file. 
+//!                                Argument: pointer to int file descriptor
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  resp   - Where the response is to be set. The caller must call
@@ -414,8 +418,24 @@ uint16_t        DFType() {return dfType;}
 
 static const int Fctl_ckpObj = 0;
 static const int Fctl_utimes = 1;
+static const int Fctl_setFD  = 2; // alen = sizeof(int), args->int
 
 virtual int     Fctl(int cmd, int alen, const char *args, char **resp=0);
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding 
+//! directory or file error (see also XrdOss::getErrMsg()).
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return false;}
 
 //-----------------------------------------------------------------------------
 //! Return the underlying file descriptor.
@@ -597,6 +617,21 @@ virtual uint64_t  Features();
 //-----------------------------------------------------------------------------
 
 virtual int       FSctl(int cmd, int alen, const char *args, char **resp=0);
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding error
+//! returned by any method in this class.
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return false;}
 
 //-----------------------------------------------------------------------------
 //! Initialize the storage system V1 (deprecated).

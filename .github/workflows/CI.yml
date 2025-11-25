@@ -54,8 +54,11 @@ jobs:
           gtest-dev \
           isa-l-dev \
           json-c-dev \
+          krb5 \
           krb5-dev \
+          krb5-server \
           libxml2-dev \
+          libzip-dev \
           linux-headers \
           make \
           openssl \

@@ -393,6 +393,9 @@ uint16_t        DFType() {return wrapDF.DFType();}
 //!                                Response: Pointer to XrdOucChkPnt object.
 //!                  Fctl_utimes - Set atime and mtime (no response).
 //!                                Argument: struct timeval tv[2]
+//!                  Fctl_setFD  - Set file descriptor for unopened file. 
+//!                                Argument: pointer to int file descriptor
+//! @param  alen   - Length of data pointed to by args.
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  resp   - Where the response is to be set. The caller must call
@@ -403,6 +406,21 @@ uint16_t        DFType() {return wrapDF.DFType();}
 
 virtual int     Fctl(int cmd, int alen, const char *args, char **resp=0)
                     {return wrapDF.Fctl(cmd, alen, args, resp);}
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding 
+//! directory or file error (see also XrdOssWrapper::getErrMsg()).
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return wrapDF.getErrMsg(eText);}
 
 //-----------------------------------------------------------------------------
 //! Return the underlying file descriptor.
@@ -534,6 +552,22 @@ virtual void      EnvInfo(XrdOucEnv *envP) {wrapPI.EnvInfo(envP);}
 //-----------------------------------------------------------------------------
 
 virtual uint64_t  Features() {return wrapPI.Features();}
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding error
+//! returned by any method in this class.
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool      getErrMsg(std::string& eText)
+                           {return wrapPI.getErrMsg(eText);}
 
 //-----------------------------------------------------------------------------
 //! Execute a special storage system operation.
