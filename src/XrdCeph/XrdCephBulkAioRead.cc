@@ -185,7 +185,7 @@ int bulkAioRead::read(void* out_buf, size_t req_size, off64_t offset) {
     }
 
     buf_pos += chunk_len;
-    
+
     start_block++;
     chunk_start = 0;
     if (chunk_len > to_read) {
@@ -193,6 +193,86 @@ int bulkAioRead::read(void* out_buf, size_t req_size, off64_t offset) {
       return -EINVAL;
     }
     to_read = to_read - chunk_len;
+  }
+  return 0;
+}
+
+
+ssize_t bulkAioRead::write(const void* in_buf, size_t req_size, off64_t offset) {
+  /**
+   * Synchronously write file data.
+   *
+   * Read coordinates are global, i.e. valid offsets are from 0 to the <file_size> -1, valid request sizes
+   * are from 0 to INF.
+   *
+   * @param in_buf     input buffer, where data to be written is stored
+   * @param req_size   number of bytes to write
+   * @param offset     offset in bytes where the write should start. Note that the offset is global,
+   *                   i.e. refers to the whole file, not individual ceph objects
+   *
+   * @return  zero on success, negative error code on failure
+   *
+   */
+
+  if (req_size == 0) {
+    log_func((char*)"Zero-length write request for file %s, probably client error", file_ref->name.c_str());
+    return 0;
+  }
+
+  char* buf_ptr = (char*) in_buf;
+
+  size_t object_size = file_ref->objectSize;
+  //The amount of bytes that is yet to be read
+  size_t to_write = req_size;
+  //block means ceph object here
+  size_t cur_block = offset / object_size;
+  size_t chunk_offset = offset % object_size;
+  //size_t buf_pos = 0;
+  //char block_suffix[18];
+  size_t total_bytes_written = 0;
+
+  while (to_write > 0) {
+    size_t chunk_len = std::min(object_size - chunk_offset, to_write);
+    int res =  write_to_object(buf_ptr, cur_block, chunk_len, chunk_offset);
+    if (0 == res) {
+      buf_ptr += chunk_len;
+      total_bytes_written += chunk_len;
+      cur_block += 1;
+      chunk_offset = 0;
+      to_write -= chunk_len;
+    } else {
+      return res;
+    }
+  }
+  return total_bytes_written;
+}
+
+int bulkAioRead::write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset) {
+  std::string obj_name;
+  if (int res = get_object_name(cur_block, obj_name)) {
+    return res;
+  }
+  ceph::bufferlist bl;
+  bl.append((const char*)buf_ptr, chunk_len);
+  return context->write(obj_name.c_str(), bl, chunk_len, chunk_offset);
+}
+
+int bulkAioRead::get_object_name(size_t obj_idx, std::string& res){
+  /* Writes full object name to buf. Returns 0 on success, or negative error code on error
+   */
+  char object_suffix[18];
+  int sp_bytes_written;
+  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
+  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
+    log_func((char*)"Can not fit object suffix into buffer for file %s -- too big\n", file_ref->name.c_str());
+    return -EFBIG;
+  }
+
+  try {
+    res = file_ref->name + std::string(object_suffix);
+  } catch (std::bad_alloc&) {
+    log_func((char*)"Can not create object string for file %s)", file_ref->name.c_str());
+    return -ENOMEM;
   }
   return 0;
 }
