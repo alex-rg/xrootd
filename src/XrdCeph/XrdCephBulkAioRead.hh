@@ -32,6 +32,7 @@ class bulkAioRead {
   int submit_and_wait_for_complete();
   ssize_t get_results();
   int read(void *out_buf, size_t size, off64_t offset);
+  ssize_t write(const void *in_buf, size_t size, off64_t offset);
 
   private:
   //Completion pointer
@@ -81,6 +82,8 @@ class bulkAioRead {
 
   
 
+  int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
+  int get_object_name(size_t obj_idx, std::string& res);
   int addRequest(size_t obj_idx, char *out_buf, size_t size, off64_t offset);
   librados::IoCtx* context;
   std::list<ReadOpData> buffers;
