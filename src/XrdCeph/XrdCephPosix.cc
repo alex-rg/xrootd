@@ -852,6 +852,16 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
+
+    librados::IoCtx *ioctx = getIoCtx(*fr);
+    if (0 == ioctx) {
+      return -EINVAL;
+    }
+
+    //Constructor can throw bad alloc
+    //bulkAioRead writeOp(ioctx, logwrapper, fr);
+    //int rc = writeOp.write(buf, count, offset);
+
     libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
     if (0 == striper) {
       return -EINVAL;
