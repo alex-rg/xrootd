@@ -52,9 +52,8 @@
 #include <XrdOss/XrdOss.hh>
 #include "XrdOuc/XrdOucIOVec.hh"
 #include "XrdCeph/XrdCephPosix.hh"
-#include "XrdCeph/XrdCephBulkAioRead.hh"
+#include "XrdCeph/XrdCephFileIOAdapter.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
-
 
 /// small struct for directory listing
 struct DirIterator {
@@ -97,10 +96,11 @@ unsigned int g_maxCephPoolIdx = 1;
 /// populated in case of ceph.namelib entry in the config file in XrdCephOss
 XrdOucName2Name *g_namelib = 0;
 
+
 /// global variable holding a list of files currently opened for write
 std::multiset<std::string> g_filesOpenForWrite;
 /// global variable holding a map of file descriptor to file reference
-std::map<unsigned int, CephFileRef> g_fds;
+std::map<unsigned int, XrdCephFileIOAdapter> g_fds;
 /// global variable remembering the next available file descriptor
 unsigned int g_nextCephFd = 0;
 /// mutex protecting the map of file descriptors and the openForWrite multiset
@@ -146,9 +146,9 @@ bool isOpenForWrite(std::string& name) {
 }
 
 /// look for a FileRef from its file descriptor
-CephFileRef* getFileRef(int fd) {
+XrdCephFileIOAdapter* getFileRef(int fd) {
   XrdSysMutexHelper lock(g_fd_mutex);
-  std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
+  std::map<unsigned int, XrdCephFileIOAdapter>::iterator it = g_fds.find(fd);
   if (it != g_fds.end()) {
     // We will release the lock upon exiting this function.
     // The structure here is not protected from deletion, but we trust xrootd to
@@ -161,12 +161,12 @@ CephFileRef* getFileRef(int fd) {
 }
 
 /// deletes a FileRef from the global table of file descriptors
-void deleteFileRef(int fd, const CephFileRef &fr) {
+void deleteFileRef(int fd, const XrdCephFileIOAdapter &fr) {
   XrdSysMutexHelper lock(g_fd_mutex);
   if ((fr.flags & O_ACCMODE) != O_RDONLY) {
     g_filesOpenForWrite.erase(g_filesOpenForWrite.find(fr.name));
   }
-  std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
+  std::map<unsigned int, XrdCephFileIOAdapter>::iterator it = g_fds.find(fd);
   if (it != g_fds.end()) {
     g_fds.erase(it);
   }
@@ -176,7 +176,7 @@ void deleteFileRef(int fd, const CephFileRef &fr) {
  * inserts a new FileRef into the global table of file descriptors
  * and return the associated file descriptor
  */
-int insertFileRef(CephFileRef &fr) {
+int insertFileRef(XrdCephFileIOAdapter &fr) {
   XrdSysMutexHelper lock(g_fd_mutex);
   g_fds[g_nextCephFd] = fr;
   g_nextCephFd++;
@@ -185,6 +185,7 @@ int insertFileRef(CephFileRef &fr) {
   }
   return g_nextCephFd-1;
 }
+
 
 /// global variable containing defaults for CephFiles
 CephFile g_defaultParams = { "",
@@ -450,13 +451,13 @@ static CephFile getCephFile(const char *path, XrdOucEnv *env) {
   return file;
 }
 
-static CephFileRef getCephFileRef(const char *path, XrdOucEnv *env, int flags,
+static XrdCephFileIOAdapter getCephFileRef(const char *path, XrdOucEnv *env, int flags,
                                   mode_t mode, unsigned long long offset) {
-  CephFileRef fr;
+  XrdCephFileIOAdapter fr;
   fillCephFile(path, env, fr);
   fr.flags = flags;
   fr.mode = mode;
-  fr.offset = 0;
+  fr.current_offset = 0;
   fr.maxOffsetWritten = 0;
   fr.bytesAsyncWritePending = 0;
   fr.bytesWritten = 0;
@@ -470,6 +471,7 @@ static CephFileRef getCephFileRef(const char *path, XrdOucEnv *env, int flags,
   fr.lastAsyncSubmission.tv_usec = 0;
   fr.longestAsyncWriteTime = 0.0l;
   fr.longestCallbackInvocation = 0.0l;
+  fr.log_func = logwrapper;
   return fr;
 }
 
@@ -663,7 +665,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
 
-  CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
+  XrdCephFileIOAdapter fr = getCephFileRef(pathname, env, flags, mode, 0);
 
   struct stat buf;
   libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
@@ -758,8 +760,18 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
 }
 
 int ceph_posix_close(int fd) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
+
   if (fr) {
+    if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is READ
+      //Write object size to file attributes
+      /*ret = context->getxattr(obj_name, "striper.layout.stripe_unit", d_stripeUnit);
+      ret = std::min(ret,context->getxattr(obj_name, "striper.layout.object_size", d_objectSize));
+      //log_func((char*)"size xattr for %s , %llu ,%llu", file_ref->name.c_str(), file_ref->objectSize, file_ref->stripeUnit );
+      if (ret<=0){
+        logwrapper((char*)"Could not find size or stripe_unit xattr for %s", fr.name.c_str());
+      }*/
+    }
     ::timeval now;
     ::gettimeofday(&now, nullptr);
     XrdSysMutexHelper lock(fr->statsMutex);
@@ -787,19 +799,19 @@ int ceph_posix_close(int fd) {
 static off64_t lseek_compute_offset(CephFileRef &fr, off64_t offset, int whence) {
   switch (whence) {
   case SEEK_SET:
-    fr.offset = offset;
+    fr.current_offset = offset;
     break;
   case SEEK_CUR:
-    fr.offset += offset;
+    fr.current_offset += offset;
     break;
   default:
     return -EINVAL;
   }
-  return fr.offset;
+  return fr.current_offset;
 }
 
 off_t ceph_posix_lseek(int fd, off_t offset, int whence) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_lseek: for fd %d, offset=%lld, whence=%d", fd, offset, whence);
     return (off_t)lseek_compute_offset(*fr, offset, whence);
@@ -809,7 +821,7 @@ off_t ceph_posix_lseek(int fd, off_t offset, int whence) {
 }
 
 off64_t ceph_posix_lseek64(int fd, off64_t offset, int whence) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_lseek64: for fd %d, offset=%lld, whence=%d", fd, offset, whence);
     return lseek_compute_offset(*fr, offset, whence);
@@ -819,7 +831,7 @@ off64_t ceph_posix_lseek64(int fd, off64_t offset, int whence) {
 }
 
 ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
@@ -831,13 +843,13 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
     }
     ceph::bufferlist bl;
     bl.append((const char*)buf, count);
-    int rc = striper->write(fr->name, bl, count, fr->offset);
+    int rc = striper->write(fr->name, bl, count, fr->current_offset);
     if (rc) return rc;
-    fr->offset += count;
+    fr->current_offset += count;
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
     fr->bytesWritten+=count;
-    if (fr->offset) fr->maxOffsetWritten = std::max(fr->offset - 1, fr->maxOffsetWritten);
+    if (fr->current_offset) fr->maxOffsetWritten = std::max(fr->current_offset - 1, fr->maxOffsetWritten);
     return count;
   } else {
     return -EBADF;
@@ -845,7 +857,7 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
 }
 
 ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
@@ -885,7 +897,7 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
   size_t rc = rados_aio_get_return_value(c);
   // Compute statistics before reportng to xrootd, so that a close cannot happen
   // in the meantime.
-  CephFileRef* fr = getFileRef(awa->fd);
+  XrdCephFileIOAdapter* fr = getFileRef(awa->fd);
   if (fr) {
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->asyncWrCompletionCount++;
@@ -911,7 +923,7 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // get the parameters from the Xroot aio object
     size_t count = aiop->sfsAio.aio_nbytes;
@@ -955,7 +967,7 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
 }
 
 ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
@@ -977,10 +989,10 @@ ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
 
     try {
       //Constructor can throw bad alloc
-      bulkAioRead readOp(ioctx, logwrapper, fr);
+      //XrdCephFileIOAdapter readOp(ioctx, ioctx, logwrapper, fr);
 
       for (int i = 0; i < n; i++) {
-        rc = readOp.read(readV[i].data, readV[i].size, readV[i].offset);
+        rc = fr->read(ioctx, readV[i].data, readV[i].size, readV[i].offset);
         if (rc < 0) {
           logwrapper( (char*)"Can not declare read request\n");
           return rc;
@@ -988,7 +1000,7 @@ ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
       }
 
       std::time_t wait_time = std::time(0);
-      rc = readOp.submit_and_wait_for_complete();
+      rc = fr->submit_reads_and_wait_for_complete(ioctx);
       wait_time = std::time(0) - wait_time;
       if (wait_time > g_cephAioWaitThresh) {
         logwrapper(
@@ -1001,7 +1013,7 @@ ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
         logwrapper( (char*)"Can not submit read requests\n");
         return rc;
       }
-      read_bytes = readOp.get_results();
+      read_bytes = fr->get_read_results();
       XrdSysMutexHelper lock(fr->statsMutex);
       //We consider readv as a single operation
       fr->rdcount += 1;
@@ -1031,7 +1043,7 @@ ssize_t ceph_striper_readv(int fd, XrdOucIOVec *readV, int n) {
 }
 
 ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
@@ -1043,11 +1055,11 @@ ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
       return -EINVAL;
     }
     ceph::bufferlist bl;
-    int rc = striper->read(fr->name, &bl, count, fr->offset);
+    int rc = striper->read(fr->name, &bl, count, fr->current_offset);
     if (rc < 0) return rc;
     bl.begin().copy(rc, (char*)buf);
     XrdSysMutexHelper lock(fr->statsMutex);
-    fr->offset += rc;
+    fr->current_offset += rc;
     fr->rdcount++;
     return rc;
   } else {
@@ -1058,7 +1070,7 @@ ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
 ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t offset) {
   //The same as pread, but do not relies on rados striper library. Uses direct atomic
   //reads from ceph object (see BulkAioRead class for details).
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
@@ -1080,14 +1092,13 @@ ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t off
 
     try {
       //Constructor can throw bad alloc
-      bulkAioRead readOp(ioctx, logwrapper, fr);
-      rc = readOp.read(buf, count, offset);
+      rc = fr->read(ioctx, buf, count, offset);
       if (rc < 0) {
         logwrapper( (char*)"Can not declare read request\n");
         return rc;
       }
       std::time_t wait_time = std::time(0);
-      rc = readOp.submit_and_wait_for_complete();
+      rc = fr->submit_reads_and_wait_for_complete(ioctx);
       wait_time = std::time(0) - wait_time;
       if (wait_time > g_cephAioWaitThresh) {
         logwrapper(
@@ -1100,7 +1111,7 @@ ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t off
         logwrapper( (char*)"Can not submit read request\n");
         return rc;
       }
-      bytes_read = readOp.get_results();
+      bytes_read = fr->get_read_results();
 
       if (bytes_read > 0) {
         XrdSysMutexHelper lock(fr->statsMutex);
@@ -1118,7 +1129,7 @@ ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t off
 }
 
 ssize_t ceph_posix_pread(int fd, void *buf, size_t count, off64_t offset) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
@@ -1173,7 +1184,7 @@ static void ceph_aio_read_complete(rados_completion_t c, void *arg) {
   }
   // Compute statistics before reportng to xrootd, so that a close cannot happen
   // in the meantime.
-  CephFileRef* fr = getFileRef(awa->fd);
+  XrdCephFileIOAdapter* fr = getFileRef(awa->fd);
   if (fr) {
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->asyncRdCompletionCount++;
@@ -1183,7 +1194,7 @@ static void ceph_aio_read_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // get the parameters from the Xroot aio object
     size_t count = aiop->sfsAio.aio_nbytes;
@@ -1223,7 +1234,7 @@ ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
 }
 
 int ceph_posix_fstat(int fd, struct stat *buf) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)__FUNCTION__,": fd %d", fd);
     // minimal stat : only size and times are filled
@@ -1283,7 +1294,7 @@ int ceph_posix_stat(XrdOucEnv* env, const char *pathname, struct stat *buf) {
 }
 
 int ceph_posix_fsync(int fd) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // no locking of fr as it is not used.
     logwrapper((char*)"ceph_sync: fd %d", fd);
@@ -1294,7 +1305,7 @@ int ceph_posix_fsync(int fd) {
 }
 
 int ceph_posix_fcntl(int fd, int cmd, ... /* arg */ ) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_fcntl: fd %d cmd=%d", fd, cmd);
     // minimal implementation
@@ -1332,7 +1343,7 @@ ssize_t ceph_posix_getxattr(XrdOucEnv* env, const char* path,
 
 ssize_t ceph_posix_fgetxattr(int fd, const char* name,
                              void* value, size_t size) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_fgetxattr: fd %d name=%s", fd, name);
     return ceph_posix_internal_getxattr(*fr, name, value, size);
@@ -1366,7 +1377,7 @@ ssize_t ceph_posix_setxattr(XrdOucEnv* env, const char* path,
 int ceph_posix_fsetxattr(int fd,
                          const char* name, const void* value,
                          size_t size, int flags)  {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_fsetxattr: fd %d name=%s value=%s", fd, name, value);
     return ceph_posix_internal_setxattr(*fr, name, value, size, flags);
@@ -1394,7 +1405,7 @@ int ceph_posix_removexattr(XrdOucEnv* env, const char* path,
 }
 
 int ceph_posix_fremovexattr(int fd, const char* name) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_fremovexattr: fd %d name=%s", fd, name);
     return ceph_posix_internal_removexattr(*fr, name);
@@ -1443,7 +1454,7 @@ int ceph_posix_listxattrs(XrdOucEnv* env, const char* path, XrdSysXAttr::AList *
 }
 
 int ceph_posix_flistxattrs(int fd, XrdSysXAttr::AList **aPL, int getSz) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_flistxattrs: fd %d", fd);
     return ceph_posix_internal_listxattrs(*fr, aPL, getSz);
@@ -1533,7 +1544,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 }
 
 int ceph_posix_ftruncate(int fd, unsigned long long size) {
-  CephFileRef* fr = getFileRef(fd);
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_posix_ftruncate: fd %d, size %d", fd, size);
     return ceph_posix_internal_truncate(*fr, size);
