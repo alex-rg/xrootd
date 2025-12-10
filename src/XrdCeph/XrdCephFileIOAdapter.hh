@@ -65,6 +65,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
    */ 
   public:
   XrdCephFileIOAdapter(logfunc_pointer ptr=NULL);
+  XrdCephFileIOAdapter(const CephFile file);
   ~XrdCephFileIOAdapter();
 
   void clear();
@@ -75,6 +76,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
+  int setxattr(librados::IoCtx* context, const char* name, const char *input_buf, size_t len);
   logfunc_pointer log_func; 
 
   private:

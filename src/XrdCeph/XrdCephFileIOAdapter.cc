@@ -19,6 +19,15 @@ int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
   return 0;
 }
 
+XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file) {
+  name = file.name;
+  pool = file.pool;
+  userId = file.userId;
+  nbStripes = file.nbStripes;
+  stripeUnit = file.stripeUnit;
+  objectSize = file.objectSize;
+};
+
 XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
   bl.append(input_buf, len);
 }
@@ -340,6 +349,19 @@ int XrdCephFileIOAdapter::write_to_object(const char* buf_ptr, size_t cur_block,
   bl.append((const char*)buf_ptr, chunk_len);
   return context->write(obj_name.c_str(), bl, chunk_len, chunk_offset);
 }*/
+
+int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* name, const char *input_buf, size_t len) {
+  std::string obj_name;
+  int rc;
+  rc = get_object_name(0, obj_name);
+  if (rc) {
+    return rc;
+  }
+  ceph::bufferlist bl;
+  bl.append((const char*)input_buf, len);
+  rc = context->setxattr(obj_name.c_str(), name, bl);
+  return rc;
+}
 
 int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
