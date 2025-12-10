@@ -837,13 +837,18 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
+    /*libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
     if (0 == striper) {
       return -EINVAL;
     }
     ceph::bufferlist bl;
     bl.append((const char*)buf, count);
-    int rc = striper->write(fr->name, bl, count, fr->current_offset);
+    int rc = striper->write(fr->name, bl, count, fr->current_offset);*/
+    librados::IoCtx *ioctx = getIoCtx(*fr);
+    if (0 == ioctx) {
+      return -EINVAL;
+    }
+    int rc = fr->write(ioctx, (const char*)buf, count, fr->current_offset);
     if (rc) return rc;
     fr->current_offset += count;
     XrdSysMutexHelper lock(fr->statsMutex);
@@ -870,17 +875,14 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
       return -EINVAL;
     }
 
-    //Constructor can throw bad alloc
-    //bulkAioRead writeOp(ioctx, logwrapper, fr);
-    //int rc = writeOp.write(buf, count, offset);
-
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
+    /*libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
     if (0 == striper) {
       return -EINVAL;
     }
     ceph::bufferlist bl;
     bl.append((const char*)buf, count);
-    int rc = striper->write(fr->name, bl, count, offset);
+    int rc = striper->write(fr->name, bl, count, offset);*/
+    int rc = fr->write(ioctx, (const char*) buf, count, offset);
     if (rc) return rc;
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
