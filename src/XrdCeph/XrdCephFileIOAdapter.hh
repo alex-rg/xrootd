@@ -9,7 +9,7 @@
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
 
-typedef ssize_t (*IoFuncPtr)(librados::IoCtx*, size_t, const char*, size_t, off64_t);
+typedef ssize_t (*IoFuncPtr)(std::string, librados::IoCtx*, size_t, const char*, size_t, off64_t);
 
 /*enum OpType {
   OP_READ,

@@ -1,5 +1,24 @@
 #include "XrdCephFileIOAdapter.hh"
 
+int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
+  /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
+  char object_suffix[18];
+  int sp_bytes_written;
+  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
+  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
+    //log_func((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
+    return -EFBIG;
+  }
+
+  try {
+    res = filename + std::string(object_suffix);
+  } catch (std::bad_alloc&) {
+    //log_func((char*)"Can not create object string for file %s)", name.c_str());
+    return -ENOMEM;
+  }
+  return 0;
+}
+
 XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
   bl.append(input_buf, len);
 }
@@ -170,12 +189,13 @@ int XrdCephFileIOAdapter::read(librados::IoCtx* context, void* out_buf, size_t r
 }
 
 ssize_t XrdCephFileIOAdapter::write(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset) {
-  IoFuncPtr write_method = [](librados::IoCtx* context, size_t start_block, const char* buf, size_t chunk_len, off64_t chunk_offset) {
+  IoFuncPtr write_method = [](std::string filename, librados::IoCtx* context, size_t start_block, const char* buf, size_t chunk_len, off64_t chunk_offset) {
     std::string obj_name;
     ssize_t rc = 0;
-    /*if (! (rc = get_object_name(start_block, obj_name)) ) {
+    rc = _get_object_name(filename, start_block, obj_name);
+    if (rc) {
       return rc;
-    }*/
+    }
     ceph::bufferlist bl;
     bl.append(buf, chunk_len);
     rc = context->write(obj_name, bl, chunk_len, chunk_offset);
@@ -223,23 +243,29 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
       return -EINVAL;
     }
 
+    int rc = -1;
     if (NULL == func) {
-      int rc = addReadRequest(start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
+      rc = addReadRequest(start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
         log_func((char*)"Unable to submit async read request, rc=%d, file=%s\n", rc, name.c_str());
         return rc;
       }
     } else {
-      return -ENOTSUP;
-      /*if (chunk_start != 0) {
-        log_func((char*)"Attempt to write %d bytes starting from %d != 0 byte of %d ofject of file %s. Writing in the middle of objects is not supported\n", chunk_len, chunk_start, start_block, file_info->name.c_str());
-        return -EINVAL;
-      }
-      int rc = submitWriteRequest(start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start, type);
-      if (rc < 0) {
-        log_func((char*)"Unable to submit async write request, rc=%d, file=%s\n", rc, file_info->name.c_str());
+      /*std::string obj_name;
+      ssize_t rc = 0;
+      rc = _get_object_name(name, start_block, obj_name);
+      if (rc) {
         return rc;
-      }*/
+      }
+      ceph::bufferlist bl;
+      bl.append((const char*)buf, chunk_len);
+      log_func((char*)"Writing to object=%s, %d, %d\n", name.c_str(), chunk_len, chunk_start);
+      rc = context->write(obj_name, bl, chunk_len, chunk_start);*/
+      rc = func(name, context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
+      if (rc < 0) {
+        log_func((char*)"Unable to submit custom request, rc=%d, file=%s\n", rc, name.c_str());
+        return rc;
+      }
     }
 
     buf_pos += chunk_len;
@@ -317,19 +343,5 @@ int XrdCephFileIOAdapter::write_to_object(const char* buf_ptr, size_t cur_block,
 
 int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
-  char object_suffix[18];
-  int sp_bytes_written;
-  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
-  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
-    log_func((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
-    return -EFBIG;
-  }
-
-  try {
-    res = name + std::string(object_suffix);
-  } catch (std::bad_alloc&) {
-    log_func((char*)"Can not create object string for file %s)", name.c_str());
-    return -ENOMEM;
-  }
-  return 0;
+  return _get_object_name(name, obj_idx, res);
 }
