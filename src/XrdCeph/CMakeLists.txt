@@ -17,7 +17,7 @@ set(BUILD_CEPH TRUE CACHE BOOL INTERNAL FORCE)
 
 add_library(XrdCephPosix SHARED
   XrdCephPosix.cc XrdCephPosix.hh
-  XrdCephBulkAioRead.cc XrdCephBulkAioRead.hh)
+  XrdCephFileIOAdapter.cc XrdCephFileIOAdapter.hh)
 
 target_compile_options(XrdCephPosix
   PRIVATE -Wno-deprecated-declarations)
@@ -37,7 +37,7 @@ add_library(${LIB_XRD_CEPH} MODULE
   XrdCephOss.cc       XrdCephOss.hh
   XrdCephOssFile.cc   XrdCephOssFile.hh
   XrdCephOssDir.cc    XrdCephOssDir.hh
-  XrdCephBulkAioRead.cc XrdCephBulkAioRead.hh
+  XrdCephFileIOAdapter.cc XrdCephFileIOAdapter.hh
   XrdCephOssBufferedFile.cc   XrdCephOssBufferedFile.hh
   XrdCephOssReadVFile.cc   XrdCephOssReadVFile.hh
   XrdCephBuffers/XrdCephBufferDataSimple.cc XrdCephBuffers/XrdCephBufferDataSimple.hh
