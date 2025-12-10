@@ -55,6 +55,8 @@
 #include "XrdCeph/XrdCephFileIOAdapter.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
 
+#define MAX_ATTR_CHARS 128
+
 /// small struct for directory listing
 struct DirIterator {
   librados::NObjectIterator m_iterator;
@@ -763,14 +765,35 @@ int ceph_posix_close(int fd) {
   XrdCephFileIOAdapter* fr = getFileRef(fd);
 
   if (fr) {
-    if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is READ
+    if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is WRITE
       //Write object size to file attributes
-      /*ret = context->getxattr(obj_name, "striper.layout.stripe_unit", d_stripeUnit);
-      ret = std::min(ret,context->getxattr(obj_name, "striper.layout.object_size", d_objectSize));
-      //log_func((char*)"size xattr for %s , %llu ,%llu", file_ref->name.c_str(), file_ref->objectSize, file_ref->stripeUnit );
-      if (ret<=0){
-        logwrapper((char*)"Could not find size or stripe_unit xattr for %s", fr.name.c_str());
-      }*/
+      std::list<std::pair<const char*, unsigned long long>> attr_data = {
+          {"striper.layout.object_size", fr->objectSize},
+          {"striper.layout.stripe_unit", fr->stripeUnit},
+          {"striper.layout.stripe_count", 1},
+          {"striper.size", fr->bytesWritten},
+        };
+
+
+      librados::IoCtx *ioctx = getIoCtx(*fr);
+      if (0 == ioctx) {
+        return -EINVAL;
+      }
+      for (auto& attr: attr_data) {
+        char attr_value[MAX_ATTR_CHARS];
+        int sp_bytes_written;
+        sp_bytes_written = snprintf(attr_value, MAX_ATTR_CHARS, "%llu", attr.second);
+        if (sp_bytes_written >= MAX_ATTR_CHARS) {
+          logwrapper((char*)"Can not fit attribute %s into buffer for file %s -- too big\n", attr.first, fr->name.c_str());
+          return -EFBIG;
+        }
+        int rc = fr->setxattr(ioctx, attr.first, (const char*)attr_value, strnlen(attr_value, MAX_ATTR_CHARS));
+	if (rc != 0) {
+          logwrapper((char*)"Can not set file attribute %s for file %s -- got %d \n", attr.first, fr->name.c_str(), rc);
+	  //Cleanup?
+          return -EREMOTEIO;
+	}
+      }
     }
     ::timeval now;
     ::gettimeofday(&now, nullptr);
@@ -1356,13 +1379,20 @@ ssize_t ceph_posix_fgetxattr(int fd, const char* name,
 
 static ssize_t ceph_posix_internal_setxattr(const CephFile &file, const char* name,
                                             const void* value, size_t size, int flags) {
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
+  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
   if (0 == striper) {
     return -EINVAL;
   }
   ceph::bufferlist bl;
   bl.append((const char*)value, size);
-  int rc = striper->setxattr(file.name, name, bl);
+  */
+  XrdCephFileIOAdapter io_adapter(logwrapper);
+
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
+    return -EINVAL;
+  }
+  int rc = io_adapter.setxattr(ioctx, name, (const char*)value, size);
   if (rc) {
     return -rc;
   }
