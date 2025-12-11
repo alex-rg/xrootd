@@ -11,12 +11,11 @@
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
 
-typedef ssize_t (*IoFuncPtr)(std::string, librados::IoCtx*, size_t, const char*, size_t, off64_t);
-
-/*enum OpType {
+enum OpType {
   OP_READ,
-  OP_WRITE
-};*/
+  OP_WRITE_SYNC,
+  OP_WRITE_ASYNC
+};
 
 struct CephFile {
   std::string name;
@@ -77,6 +76,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   //int read(void *out_buf, size_t size, off64_t offset);
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
+  ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
   ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
@@ -152,7 +152,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
   int get_object_name(size_t obj_idx, std::string& res);
   int addReadRequest(size_t obj_idx, char *buffer, size_t size, off64_t offset);
-  int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, IoFuncPtr func);
+  int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type);
   int remove_objects(librados::IoCtx* context, bool keep_first=false);
   ssize_t get_numeric_attr(librados::IoCtx* context, const char* attr_name);
   ssize_t get_size(librados::IoCtx* context);
