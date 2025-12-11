@@ -34,7 +34,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <memory>
-#include <radosstriper/libradosstriper.hpp>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -73,11 +72,9 @@ struct AioArgs {
   ceph::bufferlist *bl;
 };
 
-/// global variables holding stripers/ioCtxs/cluster objects
+/// global variables holding ioCtxs/cluster objects
 /// Note that we have a pool of them to circumvent the limitation
 /// of having a single objecter/messenger per IoCtx
-typedef std::map<std::string, libradosstriper::RadosStriper*> StriperDict;
-std::vector<StriperDict> g_radosStripers;
 typedef std::map<std::string, librados::IoCtx*> IOCtxDict;
 std::vector<IOCtxDict> g_ioCtx;
 std::vector<librados::Rados*> g_cluster;
@@ -115,14 +112,13 @@ std::map<unsigned int, unsigned long long> g_idxCntr;
 /// Note that this is not thread safe, but we do not care
 /// as we only want a rough load balancing
 unsigned int getCephPoolIdxAndIncrease() {
-  if (g_radosStripers.size() == 0) {
+  if (g_ioCtx.size() == 0) {
     // make sure we do not have a race condition here
     XrdSysMutexHelper lock(g_init_mutex);
     // double check now that we have the lock
-    if (g_radosStripers.size() == 0) {
+    if (g_ioCtx.size() == 0) {
       // initialization phase : allocate corresponding places in the vectors
       for (unsigned int i = 0; i < g_maxCephPoolIdx; i++) {
-        g_radosStripers.push_back(StriperDict());
         g_ioCtx.push_back(IOCtxDict());
         g_cluster.push_back(0);
       }
@@ -247,11 +243,11 @@ void dumpClusterInfo() {
   int n_ioCtx = g_ioCtx.size();
   int n_filesOpenForWrite = g_filesOpenForWrite.size();
   int n_fds = g_fds.size(); 
-  int n_stripers = g_radosStripers.size(); 
-  int n_stripers_pool = 0;
-  for (size_t i = 0; i < g_radosStripers.size(); ++i) {
+  int n_stripers = -1;
+  int n_stripers_pool = -1;
+  /*for (size_t i = 0; i < g_radosStripers.size(); ++i) {
     n_stripers_pool += g_radosStripers.at(i).size();
-  }
+  }*/
   std::stringstream ss;
   ss << "Counts: " << n_cluster << " " << n_ioCtx << " " << n_filesOpenForWrite << " " 
      << n_fds << " " << n_stripers << " " << n_stripers_pool << " " << n_stripers_pool 
@@ -515,21 +511,21 @@ inline librados::Rados* checkAndCreateCluster(unsigned int cephPoolIdx,
   return g_cluster[cephPoolIdx];
 }
 
-int checkAndCreateStriper(unsigned int cephPoolIdx, std::string &userAtPool, const CephFile& file) {
-  StriperDict &sDict = g_radosStripers[cephPoolIdx];
-  StriperDict::iterator it = sDict.find(userAtPool);
-  if (it == sDict.end()) {
+int checkAndCreateIoCtx(unsigned int cephPoolIdx, std::string &userAtPool, const CephFile& file) {
+  IOCtxDict & ioDict = g_ioCtx[cephPoolIdx];
+  IOCtxDict::iterator it = ioDict.find(userAtPool);
+  if (it == ioDict.end()) {
     // we need to create a new radosStriper
     // Get a cluster
     librados::Rados* cluster = checkAndCreateCluster(cephPoolIdx, file.userId);
-    if (0 == cluster) {
-      logwrapper((char*)"checkAndCreateStriper : checkAndCreateCluster failed");
+   if (0 == cluster) {
+      logwrapper((char*)"checkAndCreateIoCtx : checkAndCreateCluster failed");
       return 0;
     }
     // create IoCtx for our pool
     librados::IoCtx *ioctx = new librados::IoCtx;
     if (0 == ioctx) {
-      logwrapper((char*)"checkAndCreateStriper : IoCtx instantiation failed");
+      logwrapper((char*)"checkAndCreateIoCtx : IoCtx instantiation failed");
       cluster->shutdown();
       delete cluster;
       g_cluster[cephPoolIdx] = 0;
@@ -537,84 +533,18 @@ int checkAndCreateStriper(unsigned int cephPoolIdx, std::string &userAtPool, con
     }
     int rc = g_cluster[cephPoolIdx]->ioctx_create(file.pool.c_str(), *ioctx);
     if (rc != 0) {
-      logwrapper((char*)"checkAndCreateStriper : ioctx_create failed, rc = %d", rc);
+      logwrapper((char*)"checkAndCreateIoCtx : ioctx_create failed, rc = %d", rc);
       cluster->shutdown();
       delete cluster;
       g_cluster[cephPoolIdx] = 0;
       delete ioctx;
       return 0;
     }
-    // create RadosStriper connection
-    libradosstriper::RadosStriper *striper = new libradosstriper::RadosStriper;
-    if (0 == striper) {
-      logwrapper((char*)"checkAndCreateStriper : RadosStriper instantiation failed");
-      delete ioctx;
-      cluster->shutdown();
-      delete cluster;
-      g_cluster[cephPoolIdx] = 0;
-      return 0;
-    }
-    rc = libradosstriper::RadosStriper::striper_create(*ioctx, striper);
-    if (rc != 0) {
-      logwrapper((char*)"checkAndCreateStriper : striper_create failed, rc = %d", rc);
-      delete striper;
-      delete ioctx;
-      cluster->shutdown();
-      delete cluster;
-      g_cluster[cephPoolIdx] = 0;
-      return 0;
-    }
-    // setup layout
-    rc = striper->set_object_layout_stripe_count(file.nbStripes);
-    if (rc != 0) {
-      logwrapper((char*)"checkAndCreateStriper : invalid nbStripes %d", file.nbStripes);
-      delete striper;
-      delete ioctx;
-      cluster->shutdown();
-      delete cluster;
-      g_cluster[cephPoolIdx] = 0;
-      return 0;
-    }
-    rc = striper->set_object_layout_stripe_unit(file.stripeUnit);
-    if (rc != 0) {
-      logwrapper((char*)"checkAndCreateStriper : invalid stripeUnit %d (must be non 0, multiple of 64K)", file.stripeUnit);
-      delete striper;
-      delete ioctx;
-      cluster->shutdown();
-      delete cluster;
-      g_cluster[cephPoolIdx] = 0;
-      return 0;
-    }
-    rc = striper->set_object_layout_object_size(file.objectSize);
-    if (rc != 0) {
-      logwrapper((char*)"checkAndCreateStriper : invalid objectSize %d (must be non 0, multiple of stripe_unit)", file.objectSize);
-      delete striper;
-      delete ioctx;
-      cluster->shutdown();
-      delete cluster;
-      g_cluster[cephPoolIdx] = 0;
-      return 0;
-    }
-    IOCtxDict & ioDict = g_ioCtx[cephPoolIdx];
     ioDict.emplace(userAtPool, ioctx);
-    sDict.emplace(userAtPool, striper);
   }
   return 1;
-} 
-
-static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
-  XrdSysMutexHelper lock(g_striper_mutex);
-  std::stringstream ss;
-  ss << file.userId << '@' << file.pool << ',' << file.nbStripes << ','
-     << file.stripeUnit << ',' << file.objectSize;
-  std::string userAtPool = ss.str();
-  unsigned int cephPoolIdx = getCephPoolIdxAndIncrease();
-  if (checkAndCreateStriper(cephPoolIdx, userAtPool, file) == 0) {
-    logwrapper((char*)"getRadosStriper : checkAndCreateStriper failed");
-    return 0;
-  }
-  return g_radosStripers[cephPoolIdx][userAtPool];
 }
+
 
 static librados::IoCtx* getIoCtx(const CephFile& file) {
   XrdSysMutexHelper lock(g_striper_mutex);
@@ -623,7 +553,7 @@ static librados::IoCtx* getIoCtx(const CephFile& file) {
      << file.stripeUnit << ',' << file.objectSize;
   std::string userAtPool = ss.str();
   unsigned int cephPoolIdx = getCephPoolIdxAndIncrease();
-  if (checkAndCreateStriper(cephPoolIdx, userAtPool, file) == 0) {
+  if (0 == checkAndCreateIoCtx(cephPoolIdx, userAtPool, file)) {
     return 0;
   }
   return g_ioCtx[cephPoolIdx][userAtPool];
@@ -632,11 +562,6 @@ static librados::IoCtx* getIoCtx(const CephFile& file) {
 void ceph_posix_disconnect_all() {
   XrdSysMutexHelper lock(g_striper_mutex);
   for (unsigned int i= 0; i < g_maxCephPoolIdx; i++) {
-    for (StriperDict::iterator it2 = g_radosStripers[i].begin();
-         it2 != g_radosStripers[i].end();
-         it2++) {
-      delete it2->second;
-    }
     for (IOCtxDict::iterator it2 = g_ioCtx[i].begin();
          it2 != g_ioCtx[i].end();
          it2++) {
@@ -644,7 +569,6 @@ void ceph_posix_disconnect_all() {
     }
     delete g_cluster[i];
   }
-  g_radosStripers.clear();
   g_ioCtx.clear();
   g_cluster.clear();
 }
@@ -675,11 +599,6 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
   librados::IoCtx *context = getIoCtx(fr);
 
   struct stat buf;
-  /*libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
-  if (NULL == striper) {
-    logwrapper((char*)"Cannot create striper");  
-    return -EINVAL;
-  }*/
   dumpClusterInfo(); // JW enhanced logging
 
   int rc = fr.stat(context, (uint64_t*)&(buf.st_size), &(buf.st_atime)); //Get details about a file
@@ -807,7 +726,10 @@ int ceph_posix_close(int fd) {
 	  break;
 	}
       }
-      fr->unlock(ioctx);
+      int rc1 = fr->unlock(ioctx);
+      if (rc1 != 0) {
+        logwrapper((char*)"Can not unlock file %s -- got %d \n", fr->name.c_str(), rc1);
+      }
     }
 
     ::timeval now;
@@ -875,13 +797,6 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
-    /*libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    ceph::bufferlist bl;
-    bl.append((const char*)buf, count);
-    int rc = striper->write(fr->name, bl, count, fr->current_offset);*/
     librados::IoCtx *ioctx = getIoCtx(*fr);
     if (0 == ioctx) {
       return -EINVAL;
@@ -913,13 +828,6 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
       return -EINVAL;
     }
 
-    /*libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    ceph::bufferlist bl;
-    bl.append((const char*)buf, count);
-    int rc = striper->write(fr->name, bl, count, offset);*/
     int rc = fr->write(ioctx, (const char*) buf, count, offset);
     if (rc) return rc;
     XrdSysMutexHelper lock(fr->statsMutex);
@@ -963,47 +871,7 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
-  if (fr) {
-    // get the parameters from the Xroot aio object
-    size_t count = aiop->sfsAio.aio_nbytes;
-    const char *buf = (const char*)aiop->sfsAio.aio_buf;
-    size_t offset = aiop->sfsAio.aio_offset;
-    // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_ACCMODE) == O_RDONLY) {
-      return -EBADF;
-    }
-    // get the striper object
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    // prepare a bufferlist around the given buffer
-    ceph::bufferlist bl;
-    bl.append(buf, count);
-    // get the poolIdx to use
-    int cephPoolIdx = getCephPoolIdxAndIncrease();
-    // Get the cluster to use
-    librados::Rados* cluster = checkAndCreateCluster(cephPoolIdx);
-    if (0 == cluster) {
-      return -EINVAL;
-    }
-    // prepare a ceph AioCompletion object and do async call
-    AioArgs *args = new AioArgs(aiop, cb, count, fd);
-    librados::AioCompletion *completion =
-      cluster->aio_create_completion(args, ceph_aio_write_complete, NULL);
-    // do the write
-    int rc = striper->aio_write(fr->name, completion, bl, count, offset);
-    completion->release();
-    XrdSysMutexHelper lock(fr->statsMutex);
-    fr->asyncWrStartCount++;
-    ::gettimeofday(&fr->lastAsyncSubmission, nullptr);
-    fr->bytesAsyncWritePending+=count;
-    return rc;
-  } else {
-    return -EBADF;
-  }
+  return -ENOTSUP;
 }
 
 ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
@@ -1070,41 +938,11 @@ ssize_t ceph_striper_readv(int fd, XrdOucIOVec *readV, int n) {
   /**
    * Sequential, striper-based readv implementation.
    */
-  ssize_t nbytes = 0, curCount = 0;
-  for (int i=0; i<n; i++) {
-    curCount = ceph_posix_pread(fd, (void *)readV[i].data, (size_t)readV[i].size, (off_t)readV[i].offset);
-    if (curCount != readV[i].size) {
-      if (curCount < 0) return curCount;
-        return -ESPIPE;
-    }
-    nbytes += curCount;
-  }
-  return nbytes;
+  return -ENOTSUP;
 }
 
 ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
-  if (fr) {
-    // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
-      return -EBADF;
-    }
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    ceph::bufferlist bl;
-    int rc = striper->read(fr->name, &bl, count, fr->current_offset);
-    if (rc < 0) return rc;
-    bl.begin().copy(rc, (char*)buf);
-    XrdSysMutexHelper lock(fr->statsMutex);
-    fr->current_offset += rc;
-    fr->rdcount++;
-    return rc;
-  } else {
-    return -EBADF;
-  }
+  return -ENOTSUP;
 }
 
 ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t offset) {
@@ -1169,27 +1007,7 @@ ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t off
 }
 
 ssize_t ceph_posix_pread(int fd, void *buf, size_t count, off64_t offset) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
-  if (fr) {
-    // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
-      return -EBADF;
-    }
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    ceph::bufferlist bl;
-    int rc = striper->read(fr->name, &bl, count, offset);
-    if (rc < 0) return rc;
-    bl.begin().copy(rc, (char*)buf);
-    XrdSysMutexHelper lock(fr->statsMutex);
-    fr->rdcount++;
-    return rc;
-  } else {
-    return -EBADF;
-  }
+  return -ENOTSUP;
 }
 
 ssize_t ceph_posix_maybestriper_pread(int fd, void *buf, size_t count, off64_t offset, bool allowStriper) {
@@ -1234,43 +1052,7 @@ static void ceph_aio_read_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
-  if (fr) {
-    // get the parameters from the Xroot aio object
-    size_t count = aiop->sfsAio.aio_nbytes;
-    size_t offset = aiop->sfsAio.aio_offset;
-    // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_aio_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
-      return -EBADF;
-    }
-    // get the striper object
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      return -EINVAL;
-    }
-    // prepare a bufferlist to receive data
-    ceph::bufferlist *bl = new ceph::bufferlist();
-    // get the poolIdx to use
-    int cephPoolIdx = getCephPoolIdxAndIncrease();
-    // Get the cluster to use
-    librados::Rados* cluster = checkAndCreateCluster(cephPoolIdx);
-    if (0 == cluster) {
-      return -EINVAL;
-    }
-    // prepare a ceph AioCompletion object and do async call
-    AioArgs *args = new AioArgs(aiop, cb, count, fd, bl);
-    librados::AioCompletion *completion =
-      cluster->aio_create_completion(args, ceph_aio_read_complete, NULL);
-    // do the read
-    int rc = striper->aio_read(fr->name, completion, bl, count, offset);
-    completion->release();
-    XrdSysMutexHelper lock(fr->statsMutex);
-    fr->asyncRdStartCount++;
-    return rc;
-  } else {
-    return -EBADF;
-  }
+  return -ENOTSUP;
 }
 
 int ceph_posix_fstat(int fd, struct stat *buf) {
@@ -1404,13 +1186,6 @@ ssize_t ceph_posix_fgetxattr(int fd, const char* name,
 
 static ssize_t ceph_posix_internal_setxattr(const CephFile &file, const char* name,
                                             const void* value, size_t size, int flags) {
-  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
-    return -EINVAL;
-  }
-  ceph::bufferlist bl;
-  bl.append((const char*)value, size);
-  */
   XrdCephFileIOAdapter io_adapter(file);
   io_adapter.log_func = logwrapper;
 
@@ -1597,11 +1372,6 @@ int ceph_posix_stat_pool(char const *poolName, long long *usedSpace) {
 }
 
 static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long size) {
-  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
-    return -EINVAL;
-  }
-  return striper->trunc(file.name, size);*/
 
   XrdCephFileIOAdapter io_adapter(file);
   io_adapter.log_func = logwrapper;
@@ -1637,11 +1407,6 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
 
   // minimal stat : only size and times are filled
   CephFile file = getCephFile(pathname, env);
-  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
-    return -EINVAL;
-  }
-  int rc = striper->remove(file.name);*/
   XrdCephFileIOAdapter io_adapter(file);
   io_adapter.log_func = logwrapper;
 
