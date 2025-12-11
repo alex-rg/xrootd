@@ -1307,6 +1307,7 @@ int ceph_posix_stat(XrdOucEnv* env, const char *pathname, struct stat *buf) {
   // mode is set arbitrarily to 0666 | S_IFREG
   CephFile file = getCephFile(pathname, env);
   XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
     return -EINVAL;
