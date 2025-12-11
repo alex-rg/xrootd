@@ -508,6 +508,18 @@ int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
   return context->unlock(obj_name, "striper.lock", lock_cookie); 
 }
 
+int XrdCephFileIOAdapter::stat(librados::IoCtx* context, uint64_t* size, time_t* mtime) {
+  std::string obj_name;
+  int rc = get_object_name(0, obj_name);
+  if (rc < 0) {
+    return rc;
+  }
+  uint64_t tmp = 0;
+  rc = context->stat(obj_name, &tmp, mtime);
+  *size = get_size(context);
+  return rc;
+}
+
 int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
   return _get_object_name(name, obj_idx, res);
