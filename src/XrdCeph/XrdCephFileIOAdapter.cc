@@ -1,7 +1,5 @@
 #include "XrdCephFileIOAdapter.hh"
 
-#define MAX_ATTR_CHARS 128
-
 int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
   char object_suffix[18];
@@ -83,8 +81,8 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
    */
   int rc = 0;
   try{
-    //When we start using C++17, the next two lines can be merged
     auto &op_data = read_operations[obj_idx];
+    //When we start using C++17, the next two lines can be merged
     op_data.read_buffers.emplace_back(buffer);
     auto &buf = op_data.read_buffers.back();
     op_data.ceph_read_op.read(offset, size, &buf.bl, &buf.rc);
@@ -486,6 +484,28 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
     }
   }
   return rc;
+}
+
+int XrdCephFileIOAdapter::lock(librados::IoCtx* context, time_t lock_timeout) {
+  std::string obj_name;
+  int rc = get_object_name(0, obj_name);
+  if (rc < 0) {
+    return rc;
+  }
+  struct timeval tv;
+  tv.tv_sec = lock_timeout;
+  tv.tv_usec = 0;
+  return context->lock_exclusive(obj_name, "striper.lock", lock_cookie, "", &tv, 0); 
+}
+
+int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
+  std::string obj_name;
+  int rc = get_object_name(0, obj_name);
+  if (rc < 0) {
+    return rc;
+  }
+
+  return context->unlock(obj_name, "striper.lock", lock_cookie); 
 }
 
 int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
