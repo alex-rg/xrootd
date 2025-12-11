@@ -6,6 +6,8 @@
 
 #include "XrdSys/XrdSysPthread.hh"
 
+#define MAX_ATTR_CHARS 128
+
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
 
@@ -80,6 +82,9 @@ class XrdCephFileIOAdapter: public CephFileRef {
   ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
   int remove(librados::IoCtx* context);
   int truncate(librados::IoCtx* context);
+  int lock(librados::IoCtx* context,  time_t lock_timeout=6*3600);
+  int unlock(librados::IoCtx* context);
+  std::string lock_cookie;
   logfunc_pointer log_func;
 
   private:

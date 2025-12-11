@@ -26,6 +26,7 @@
  * This interface provides wrapper methods for using ceph through a POSIX API.
  */
 
+#define MAX_LOCK_COOKIE_CHARS 256
 #ifndef _XRD_CEPH_POSIX_H
 #define _XRD_CEPH_POSIX_H
 
