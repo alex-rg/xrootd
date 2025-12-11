@@ -55,8 +55,6 @@
 #include "XrdCeph/XrdCephFileIOAdapter.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
 
-#define MAX_ATTR_CHARS 128
-
 /// small struct for directory listing
 struct DirIterator {
   librados::NObjectIterator m_iterator;
@@ -474,6 +472,12 @@ static XrdCephFileIOAdapter getCephFileRef(const char *path, XrdOucEnv *env, int
   fr.longestAsyncWriteTime = 0.0l;
   fr.longestCallbackInvocation = 0.0l;
   fr.log_func = logwrapper;
+  //Use hostname as lock cookie
+  char hostname[MAX_LOCK_COOKIE_CHARS-10];
+  char cookie[MAX_LOCK_COOKIE_CHARS];
+  gethostname(hostname, MAX_LOCK_COOKIE_CHARS-10);
+  snprintf(cookie, MAX_LOCK_COOKIE_CHARS, "%u@%s", getpid(), hostname);
+  fr.lock_cookie = std::string(cookie);
   return fr;
 }
 
@@ -668,6 +672,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
 
   XrdCephFileIOAdapter fr = getCephFileRef(pathname, env, flags, mode, 0);
+  librados::IoCtx *context = getIoCtx(fr);
 
   struct stat buf;
   libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
@@ -690,7 +695,6 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
       librados::bufferlist d_stripeUnit;
       librados::bufferlist d_objectSize;
       std::string obj_name;
-      librados::IoCtx *context = getIoCtx(fr);
   
       // read first stripe of the object for xattr stripe unit and object size
       // this will fail if the object was not written in stripes e.g. s3
@@ -738,9 +742,14 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
     }
 
   } else {                              // Access mode is WRITE
+    rc = fr.lock(context);
+    if (rc < 0) {
+      logwrapper((char*)"Unable to lock file %s", pathname);
+      return -ENOLCK;
+    }
     if (fileExists) {
       if (flags & O_TRUNC) {
-        int rc = ceph_posix_unlink(env, pathname);
+        rc = ceph_posix_unlink(env, pathname);
         if (rc < 0 && rc != -ENOENT) {
           return rc;
         }
@@ -764,6 +773,8 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
 int ceph_posix_close(int fd) {
   XrdCephFileIOAdapter* fr = getFileRef(fd);
 
+  int rc = 0;
+
   if (fr) {
     if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is WRITE
       //Write object size to file attributes
@@ -785,16 +796,20 @@ int ceph_posix_close(int fd) {
         sp_bytes_written = snprintf(attr_value, MAX_ATTR_CHARS, "%llu", attr.second);
         if (sp_bytes_written >= MAX_ATTR_CHARS) {
           logwrapper((char*)"Can not fit attribute %s into buffer for file %s -- too big\n", attr.first, fr->name.c_str());
-          return -EFBIG;
+          rc = -EFBIG;
+	  break;
         }
         int rc = fr->setxattr(ioctx, attr.first, (const char*)attr_value, strnlen(attr_value, MAX_ATTR_CHARS));
 	if (rc != 0) {
           logwrapper((char*)"Can not set file attribute %s for file %s -- got %d \n", attr.first, fr->name.c_str(), rc);
 	  //Cleanup?
-          return -EREMOTEIO;
+          rc = -EREMOTEIO;
+	  break;
 	}
       }
+      fr->unlock(ioctx);
     }
+
     ::timeval now;
     ::gettimeofday(&now, nullptr);
     XrdSysMutexHelper lock(fr->statsMutex);
@@ -813,7 +828,7 @@ int ceph_posix_close(int fd) {
                fr->asyncRdCompletionCount, fr->asyncRdStartCount, fr->bytesWritten,  fr->maxOffsetWritten,
                fr->longestAsyncWriteTime, fr->longestCallbackInvocation, (lastAsyncAge));
     deleteFileRef(fd, *fr);
-    return 0;
+    return rc;
   } else {
     return -EBADF;
   }
@@ -1628,7 +1643,9 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
   if (0 == ioctx) {
     return -EINVAL;
   }
+  io_adapter.lock(ioctx);
   int rc = io_adapter.remove(ioctx);
+  io_adapter.unlock(ioctx);
   auto end = std::chrono::steady_clock::now();
   auto deltime_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - timer_start).count();
 
