@@ -359,7 +359,7 @@ int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_na
   }
   ceph::bufferlist bl;
   bl.append((const char*)input_buf, len);
-  rc = context->setxattr(obj_name.c_str(), attr_name, bl);
+  rc = context->setxattr(obj_name, attr_name, bl);
   if (rc) {
     log_func((char*)"Can not get %s attr for for file %s -- too big\n", attr_name, name.c_str());
   }
@@ -404,6 +404,15 @@ ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* att
   return to_copy;
 }
 
+int XrdCephFileIOAdapter::rmxattr(librados::IoCtx* context, const char* name) {
+  std::string obj_name;
+  int rc = get_object_name(0, obj_name);
+  if (rc) {
+    return rc;
+  }
+  return context->rmxattr(obj_name, name);
+}
+
 ssize_t XrdCephFileIOAdapter::get_numeric_attr(librados::IoCtx* context, const char* attr_name) {
   char tmp_buf[MAX_ATTR_CHARS];
   int rc = getxattr(context, attr_name, tmp_buf, MAX_ATTR_CHARS-1);
@@ -425,7 +434,6 @@ ssize_t XrdCephFileIOAdapter::get_object_size(librados::IoCtx* context) {
   ssize_t obj_size = get_numeric_attr(context, "striper.layout.object_size");
   return obj_size;
 }
-
 
 int XrdCephFileIOAdapter::remove(librados::IoCtx* context) {
   return remove_objects(context);
