@@ -1444,15 +1444,15 @@ int ceph_posix_fsetxattr(int fd,
 }
 
 static int ceph_posix_internal_removexattr(const CephFile &file, const char* name) {
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
+  XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
+
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
     return -EINVAL;
   }
-  int rc = striper->rmxattr(file.name, name);
-  if (rc) {
-    return -rc;
-  }
-  return 0;
+  int rc = io_adapter.rmxattr(ioctx, name);
+  return rc;
 }
 
 int ceph_posix_removexattr(XrdOucEnv* env, const char* path,

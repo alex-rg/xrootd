@@ -81,6 +81,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
   ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
   int getxattrs(librados::IoCtx* context, std::map<std::string, ceph::bufferlist>& dict);
+  int rmxattr(librados::IoCtx* context, const char* name);
   int remove(librados::IoCtx* context);
   int truncate(librados::IoCtx* context);
   int lock(librados::IoCtx* context,  time_t lock_timeout=6*3600);
