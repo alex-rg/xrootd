@@ -1,25 +1,6 @@
 #include <stdarg.h>
 #include "XrdCephFileIOAdapter.hh"
 
-int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
-  /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
-  char object_suffix[18];
-  int sp_bytes_written;
-  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
-  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
-    //log((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
-    return -EFBIG;
-  }
-
-  try {
-    res = filename + std::string(object_suffix);
-  } catch (std::bad_alloc&) {
-    //log((char*)"Can not create object string for file %s)", name.c_str());
-    return -ENOMEM;
-  }
-  return 0;
-}
-
 void XrdCephFileIOAdapter::log(char* format, ...) {
   va_list arg;
   if (log_func != NULL) {
@@ -205,26 +186,27 @@ ssize_t XrdCephFileIOAdapter::get_read_results() {
 }
 
 int XrdCephFileIOAdapter::read(librados::IoCtx* context, void* out_buf, size_t req_size, off64_t offset) {
-  return io_req_block_loop(context, out_buf, req_size, offset, NULL);
+  return io_req_block_loop(context, out_buf, req_size, offset, OP_READ);
+}
+
+ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
+  std::string obj_name;
+  ssize_t rc = 0;
+  rc = get_object_name(block_num, obj_name);
+  if (rc) {
+    return rc;
+  }
+  ceph::bufferlist bl;
+  bl.append(input_buf, req_size);
+  rc = context->write(obj_name, bl, req_size, offset);
+  return rc;
 }
 
 ssize_t XrdCephFileIOAdapter::write(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset) {
-  IoFuncPtr write_method = [](std::string filename, librados::IoCtx* context, size_t start_block, const char* buf, size_t chunk_len, off64_t chunk_offset) {
-    std::string obj_name;
-    ssize_t rc = 0;
-    rc = _get_object_name(filename, start_block, obj_name);
-    if (rc) {
-      return rc;
-    }
-    ceph::bufferlist bl;
-    bl.append(buf, chunk_len);
-    rc = context->write(obj_name, bl, chunk_len, chunk_offset);
-    return rc;
-  };
-  return io_req_block_loop(context, (void*)input_buf, req_size, offset, write_method);
+  return io_req_block_loop(context, (void*)input_buf, req_size, offset, OP_WRITE_SYNC);
 }
 
-int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, IoFuncPtr func) {
+int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type) {
   /**
    * Declare a read or write operation for file.
    *
@@ -264,26 +246,16 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
     }
 
     int rc = -1;
-    if (NULL == func) {
+    if (OP_READ == op_type) {
       rc = addReadRequest(start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
         log((char*)"Unable to submit async read request, rc=%d, file=%s\n", rc, name.c_str());
         return rc;
       }
-    } else {
-      /*std::string obj_name;
-      ssize_t rc = 0;
-      rc = _get_object_name(name, start_block, obj_name);
-      if (rc) {
-        return rc;
-      }
-      ceph::bufferlist bl;
-      bl.append((const char*)buf, chunk_len);
-      log((char*)"Writing to object=%s, %d, %d\n", name.c_str(), chunk_len, chunk_start);
-      rc = context->write(obj_name, bl, chunk_len, chunk_start);*/
-      rc = func(name, context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
+    } else if (OP_WRITE_SYNC == op_type) {
+      rc = write_block_sync(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
-        log((char*)"Unable to submit custom request, rc=%d, file=%s\n", rc, name.c_str());
+        log((char*)"Unable to write block %u synchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
         return rc;
       }
     }
@@ -540,5 +512,19 @@ int XrdCephFileIOAdapter::stat(librados::IoCtx* context, uint64_t* size, time_t*
 
 int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
-  return _get_object_name(name, obj_idx, res);
+  char object_suffix[18];
+  int sp_bytes_written;
+  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
+  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
+    log((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
+    return -EFBIG;
+  }
+
+  try {
+    res = name + std::string(object_suffix);
+  } catch (std::bad_alloc&) {
+    log((char*)"Can not create object string for file %s)", name.c_str());
+    return -ENOMEM;
+  }
+  return 0;
 }
