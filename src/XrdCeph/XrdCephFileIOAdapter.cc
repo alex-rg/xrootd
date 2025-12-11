@@ -366,18 +366,14 @@ int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_na
   return rc;
 }
 
-int XrdCephFileIOAdapter::log_xattrs(librados::IoCtx* context) {
+int XrdCephFileIOAdapter::getxattrs(librados::IoCtx* context, std::map<std::string, ceph::bufferlist>& dict) {
   std::string obj_name;
   int rc;
   rc = get_object_name(0, obj_name);
   if (rc) {
     return rc;
   }
-  std::map<std::string, ceph::bufferlist> dict;
   rc = context->getxattrs(obj_name, dict);
-  for (auto i: dict) {
-    log_func((char*)"got attr %s\n", i.first);
-  }
   return 0;
 }
 
@@ -396,24 +392,27 @@ ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* att
     return rc;
   }
   size_t to_copy = bl.length();
-  if (to_copy > buf_size - 1) {
-    log_func((char*)"Can not fit %s attr of file %s to %lu bytes buffer -- too big (%lu+1 bytes)\n", attr_name, name.c_str(), buf_size, to_copy);
+  if (to_copy > buf_size) {
+    log_func((char*)"Can not fit %s attr of file %s to %lu bytes buffer -- too big (%lu bytes)\n", attr_name, name.c_str(), buf_size, to_copy);
     return -E2BIG;
   } 
   bl.begin().copy(bl.length(), output_buf);
-  //Just in case, add null-terminator
-  output_buf[to_copy] = '\0';
-  //  log_func((char*)"Got %s attr of file %s : %s\n", attr_name, name.c_str(), output_buf);
-
+  //If we have spece, add null-terminator, just in case
+  if (to_copy < buf_size) {
+    output_buf[to_copy] = '\0';
+  }
   return to_copy;
 }
 
 ssize_t XrdCephFileIOAdapter::get_numeric_attr(librados::IoCtx* context, const char* attr_name) {
   char tmp_buf[MAX_ATTR_CHARS];
-  int rc = getxattr(context, attr_name, tmp_buf, MAX_ATTR_CHARS);
+  int rc = getxattr(context, attr_name, tmp_buf, MAX_ATTR_CHARS-1);
   if (rc < 0) {
     return rc;
   }
+  //Add null-terminator
+  tmp_buf[rc] = '\0';
+
   return atoll(tmp_buf);
 }
 
