@@ -1374,6 +1374,8 @@ static ssize_t ceph_posix_internal_getxattr(const CephFile &file, const char* na
   return returned_size;*/
 
   XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
+
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
     return -EINVAL;
@@ -1470,13 +1472,16 @@ int ceph_posix_fremovexattr(int fd, const char* name) {
 }
 
 static int ceph_posix_internal_listxattrs(const CephFile &file, XrdSysXAttr::AList **aPL, int getSz) {
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
+  XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
+
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
     return -EINVAL;
   }
   // call ceph
   std::map<std::string, ceph::bufferlist> attrset;
-  int rc = striper->getxattrs(file.name, attrset);
+  int rc = io_adapter.getxattrs(ioctx, attrset);
   if (rc) {
     return -rc;
   }
