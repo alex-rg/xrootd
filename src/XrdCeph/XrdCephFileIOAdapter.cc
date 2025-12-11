@@ -1,5 +1,7 @@
 #include "XrdCephFileIOAdapter.hh"
 
+#define MAX_ATTR_CHARS 128
+
 int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
   char object_suffix[18];
@@ -28,9 +30,9 @@ XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file) {
   objectSize = file.objectSize;
 };
 
-XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
+/*XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
   bl.append(input_buf, len);
-}
+}*/
 
 XrdCephFileIOAdapter::CephReadOpData::CephReadOpData(const XrdCephFileIOAdapter::CephReadOpData& data) {
   cmpl = data.cmpl;
@@ -59,7 +61,7 @@ void XrdCephFileIOAdapter::clear() {
    * Clear all dynamically alocated memory
    */
   read_operations.clear();
-  write_operations.clear();
+  //write_operations.clear();
 }
 
 int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t size, off64_t offset) {
@@ -109,7 +111,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
 }
 }*/
 
-int XrdCephFileIOAdapter::wait_for_write_complete() {
+/*int XrdCephFileIOAdapter::wait_for_write_complete() {
   int ret = 0;
   for (auto &buf_data: write_operations) {
     buf_data.second.cmpl.wait_for_complete();
@@ -120,7 +122,7 @@ int XrdCephFileIOAdapter::wait_for_write_complete() {
     }
   }
   return ret;
-}
+}*/
 
 int XrdCephFileIOAdapter::submit_reads_and_wait_for_complete(librados::IoCtx* context) {
   /**
@@ -350,7 +352,7 @@ int XrdCephFileIOAdapter::write_to_object(const char* buf_ptr, size_t cur_block,
   return context->write(obj_name.c_str(), bl, chunk_len, chunk_offset);
 }*/
 
-int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* name, const char *input_buf, size_t len) {
+int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len) {
   std::string obj_name;
   int rc;
   rc = get_object_name(0, obj_name);
@@ -359,7 +361,130 @@ int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* name, c
   }
   ceph::bufferlist bl;
   bl.append((const char*)input_buf, len);
-  rc = context->setxattr(obj_name.c_str(), name, bl);
+  rc = context->setxattr(obj_name.c_str(), attr_name, bl);
+  if (rc) {
+    log_func((char*)"Can not get %s attr for for file %s -- too big\n", attr_name, name.c_str());
+  }
+  return rc;
+}
+
+int XrdCephFileIOAdapter::log_xattrs(librados::IoCtx* context) {
+  std::string obj_name;
+  int rc;
+  rc = get_object_name(0, obj_name);
+  if (rc) {
+    return rc;
+  }
+  std::map<std::string, ceph::bufferlist> dict;
+  rc = context->getxattrs(obj_name, dict);
+  for (auto i: dict) {
+    log_func((char*)"got attr %s\n", i.first);
+  }
+  return 0;
+}
+
+ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t buf_size) {
+  int rc;
+  //rc = log_xattrs(context);
+  std::string obj_name;
+  rc = get_object_name(0, obj_name);
+  if (rc) {
+    return rc;
+  }
+  ceph::bufferlist bl;
+  rc = context->getxattr(obj_name, attr_name, bl);
+  if (rc < 0) {
+    log_func((char*)"Can not get %s attr for file %s -- %d\n", attr_name, obj_name.c_str(), rc);
+    return rc;
+  }
+  size_t to_copy = bl.length();
+  if (to_copy > buf_size - 1) {
+    log_func((char*)"Can not fit %s attr of file %s to %lu bytes buffer -- too big (%lu+1 bytes)\n", attr_name, name.c_str(), buf_size, to_copy);
+    return -E2BIG;
+  } 
+  bl.begin().copy(bl.length(), output_buf);
+  //Just in case, add null-terminator
+  output_buf[to_copy] = '\0';
+  //  log_func((char*)"Got %s attr of file %s : %s\n", attr_name, name.c_str(), output_buf);
+
+  return to_copy;
+}
+
+ssize_t XrdCephFileIOAdapter::get_numeric_attr(librados::IoCtx* context, const char* attr_name) {
+  char tmp_buf[MAX_ATTR_CHARS];
+  int rc = getxattr(context, attr_name, tmp_buf, MAX_ATTR_CHARS);
+  if (rc < 0) {
+    return rc;
+  }
+  return atoll(tmp_buf);
+}
+
+ssize_t XrdCephFileIOAdapter::get_size(librados::IoCtx* context) {
+  ssize_t size = get_numeric_attr(context, "striper.size");
+  return size;
+}
+
+ssize_t XrdCephFileIOAdapter::get_object_size(librados::IoCtx* context) {
+  ssize_t obj_size = get_numeric_attr(context, "striper.layout.object_size");
+  return obj_size;
+}
+
+
+int XrdCephFileIOAdapter::remove(librados::IoCtx* context) {
+  return remove_objects(context);
+}
+
+int XrdCephFileIOAdapter::truncate(librados::IoCtx* context) {
+  int rc = remove_objects(context, true);
+  if (rc != 0) {
+    return rc;
+  }
+  std::string obj_name;
+  rc = get_object_name(0, obj_name);
+  if (rc != 0) {
+    return rc;
+  }
+  rc = context->trunc(obj_name, 0);
+  if (rc != 0) {
+    log_func((char*)"Can not truncate first object of the file %s:  %d\n", name.c_str(), rc);
+  } 
+  return rc;
+}
+
+int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_first) {
+  //CmplPtr* completions;
+  ssize_t file_size = get_size(context);
+  ssize_t object_size = get_object_size(context);
+  size_t obj_count = 0;
+  int rc = 0;
+  if (file_size < 0) {
+    log_func((char*)"Can not delete %s -- failed to get file size", name.c_str());
+    return (int)file_size;
+  } else if (0 == file_size) {
+    obj_count = 1; 
+  } else {
+    obj_count = (file_size-1) / object_size + 1;
+  }
+
+  ssize_t end_object = keep_first ? 1 : 0;
+  std::list<CmplPtr> completions;
+  for (ssize_t i=obj_count-1; i>=end_object; i--) {
+    std::string obj_name;
+    rc = get_object_name(i, obj_name);
+    if (rc < 0) {
+      return rc;
+    }
+    completions.emplace_back();
+    context->aio_remove(obj_name, completions.back().use());
+  }
+  rc = 0;
+  for (auto& c: completions) {
+    c.wait_for_complete();
+    rc = std::min(rc, c.get_return_value());
+    if (rc < 0 ) {
+      log_func((char*)"Can not delete %s -- object deletion failed %d\n", name.c_str(),  rc);
+    }
+  }
   return rc;
 }
 

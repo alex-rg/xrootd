@@ -1347,7 +1347,7 @@ int ceph_posix_fcntl(int fd, int cmd, ... /* arg */ ) {
 
 static ssize_t ceph_posix_internal_getxattr(const CephFile &file, const char* name,
                                             void* value, size_t size) {
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
+  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
   if (0 == striper) {
     return -EINVAL;
   }
@@ -1356,7 +1356,14 @@ static ssize_t ceph_posix_internal_getxattr(const CephFile &file, const char* na
   if (rc < 0) return rc;
   size_t returned_size = (size_t)rc<size?rc:size;
   bl.begin().copy(returned_size, (char*)value);
-  return returned_size;
+  return returned_size;*/
+
+  XrdCephFileIOAdapter io_adapter(file);
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
+    return -EINVAL;
+  }
+  return io_adapter.getxattr(ioctx, name, (char*)value, size);
 }
 
 ssize_t ceph_posix_getxattr(XrdOucEnv* env, const char* path,
@@ -1386,7 +1393,8 @@ static ssize_t ceph_posix_internal_setxattr(const CephFile &file, const char* na
   ceph::bufferlist bl;
   bl.append((const char*)value, size);
   */
-  XrdCephFileIOAdapter io_adapter(logwrapper);
+  XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1568,11 +1576,20 @@ int ceph_posix_stat_pool(char const *poolName, long long *usedSpace) {
 }
 
 static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long size) {
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
+  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
   if (0 == striper) {
     return -EINVAL;
   }
-  return striper->trunc(file.name, size);
+  return striper->trunc(file.name, size);*/
+
+  XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
+
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
+    return -EINVAL;
+  }
+  return io_adapter.truncate(ioctx);
 }
 
 int ceph_posix_ftruncate(int fd, unsigned long long size) {
@@ -1599,11 +1616,19 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
 
   // minimal stat : only size and times are filled
   CephFile file = getCephFile(pathname, env);
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
+  /*libradosstriper::RadosStriper *striper = getRadosStriper(file);
   if (0 == striper) {
     return -EINVAL;
   }
-  int rc = striper->remove(file.name);
+  int rc = striper->remove(file.name);*/
+  XrdCephFileIOAdapter io_adapter(file);
+  io_adapter.log_func = logwrapper;
+
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
+    return -EINVAL;
+  }
+  int rc = io_adapter.remove(ioctx);
   auto end = std::chrono::steady_clock::now();
   auto deltime_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - timer_start).count();
 
@@ -1615,7 +1640,7 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
     logwrapper((char*)"ceph_posix_unlink : %s unlink failed: %d ms; return code %d", pathname, deltime_ms, rc);
     return rc; 
   }
-  // if EBUSY returned, assume the file is locked; so try to remove the lock
+  /*// if EBUSY returned, assume the file is locked; so try to remove the lock
   logwrapper((char*)"ceph_posix_unlink : unlink failed with -EBUSY %s, now trying to remove lock.", pathname);  
 
   // lock name is only exposed in the libradosstriper source file, so hardcode it here. 
@@ -1634,7 +1659,7 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
     logwrapper((char*)"ceph_posix_unlink : unlink failed after lock removal %s, %d ms", pathname, deltime_ms);
   } else {
     logwrapper((char*)"ceph_posix_unlink : unlink succeeded after lock removal %s, %d ms", pathname, deltime_ms);
-  }
+  }*/
   return rc; 
 }
 
