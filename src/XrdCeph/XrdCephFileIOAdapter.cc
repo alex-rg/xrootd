@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include "XrdCephFileIOAdapter.hh"
 
 int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
@@ -6,26 +7,36 @@ int _get_object_name(std::string filename, size_t obj_idx, std::string& res){
   int sp_bytes_written;
   sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
   if (sp_bytes_written >= (int) sizeof(object_suffix)) {
-    //log_func((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
+    //log((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
     return -EFBIG;
   }
 
   try {
     res = filename + std::string(object_suffix);
   } catch (std::bad_alloc&) {
-    //log_func((char*)"Can not create object string for file %s)", name.c_str());
+    //log((char*)"Can not create object string for file %s)", name.c_str());
     return -ENOMEM;
   }
   return 0;
 }
 
-XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file) {
+void XrdCephFileIOAdapter::log(char* format, ...) {
+  va_list arg;
+  if (log_func != NULL) {
+    va_start(arg, format);
+    log_func(format, arg);
+    va_end(arg);
+  }
+}
+
+XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file, logfunc_pointer ptr) {
   name = file.name;
   pool = file.pool;
   userId = file.userId;
   nbStripes = file.nbStripes;
   stripeUnit = file.stripeUnit;
   objectSize = file.objectSize;
+  log_func = ptr;
 };
 
 /*XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
@@ -87,7 +98,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
     auto &buf = op_data.read_buffers.back();
     op_data.ceph_read_op.read(offset, size, &buf.bl, &buf.rc);
   } catch (std::bad_alloc&) {
-    log_func((char*)"Memory allocation failed while reading file %s", name.c_str());
+    log((char*)"Memory allocation failed while reading file %s", name.c_str());
     return -ENOMEM;
   }
   return rc;
@@ -102,7 +113,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
     auto &buf = op_data.read_buffers.back();
     op_data.ceph_read_op.read(offset, size, &buf.bl, &buf.rc);
   } catch (std::bad_alloc&) {
-    log_func((char*)"Memory allocation failed while reading file %s", file_info->name.c_str());
+    log((char*)"Memory allocation failed while reading file %s", file_info->name.c_str());
     return -ENOMEM;
   }
   return rc;
@@ -115,7 +126,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
     buf_data.second.cmpl.wait_for_complete();
     int ret = buf_data.second.cmpl.get_return_value();
     if (ret != 0) {
-      log_func((char*)"Write for file %s failed\n", name.c_str());
+      log((char*)"Write for file %s failed\n", name.c_str());
       break;
     }
   }
@@ -157,7 +168,7 @@ int XrdCephFileIOAdapter::submit_reads_and_wait_for_complete(librados::IoCtx* co
      * `aio_cancel` (i.e. may the status variable/bufferlist still be written to or not).
      */
     if (rval < 0) {
-      log_func((char*)"Read of the object %ld for file %s failed", op_data.first, name.c_str());
+      log((char*)"Read of the object %ld for file %s failed", op_data.first, name.c_str());
       return rval;
     }
   }
@@ -181,7 +192,7 @@ ssize_t XrdCephFileIOAdapter::get_read_results() {
     for (auto &req_data: op_data.second.read_buffers) {
       if (req_data.rc < 0) {
         //Is it possible to get here?
-        log_func((char*)"One of the reads failed with rc %d", req_data.rc);
+        log((char*)"One of the reads failed with rc %d", req_data.rc);
         return req_data.rc;
       }
       req_data.bl.begin().copy(req_data.bl.length(), req_data.out_buf);
@@ -231,7 +242,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
    */
 
   if (req_size == 0) {
-    log_func((char*)"Zero-length read request for file %s, probably client error", name.c_str());
+    log((char*)"Zero-length read request for file %s, probably client error", name.c_str());
     return 0;
   }
 
@@ -248,7 +259,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
     size_t chunk_len = std::min(to_process, (size_t) (objectSize - chunk_start));
 
     if (buf_pos >= req_size) {
-      log_func((char*)"Internal bug! Attempt to read %lu data for block (%lu, %lu) of file %s\n", buf_pos, offset, req_size, name.c_str());
+      log((char*)"Internal bug! Attempt to read %lu data for block (%lu, %lu) of file %s\n", buf_pos, offset, req_size, name.c_str());
       return -EINVAL;
     }
 
@@ -256,7 +267,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
     if (NULL == func) {
       rc = addReadRequest(start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
-        log_func((char*)"Unable to submit async read request, rc=%d, file=%s\n", rc, name.c_str());
+        log((char*)"Unable to submit async read request, rc=%d, file=%s\n", rc, name.c_str());
         return rc;
       }
     } else {
@@ -268,11 +279,11 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
       }
       ceph::bufferlist bl;
       bl.append((const char*)buf, chunk_len);
-      log_func((char*)"Writing to object=%s, %d, %d\n", name.c_str(), chunk_len, chunk_start);
+      log((char*)"Writing to object=%s, %d, %d\n", name.c_str(), chunk_len, chunk_start);
       rc = context->write(obj_name, bl, chunk_len, chunk_start);*/
       rc = func(name, context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
-        log_func((char*)"Unable to submit custom request, rc=%d, file=%s\n", rc, name.c_str());
+        log((char*)"Unable to submit custom request, rc=%d, file=%s\n", rc, name.c_str());
         return rc;
       }
     }
@@ -282,7 +293,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
     start_block++;
     chunk_start = 0;
     if (chunk_len > to_process) {
-      log_func((char*)"Internal bug! Process %lu bytes, more than expected %lu bytes for block (%lu, %lu) of file %s\n", chunk_len, to_process, offset, req_size, name.c_str());
+      log((char*)"Internal bug! Process %lu bytes, more than expected %lu bytes for block (%lu, %lu) of file %s\n", chunk_len, to_process, offset, req_size, name.c_str());
       return -EINVAL;
     }
     to_process = to_process - chunk_len;
@@ -308,7 +319,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
    * /
 
   if (req_size == 0) {
-    log_func((char*)"Zero-length write request for file %s, probably client error", file_ref->name.c_str());
+    log((char*)"Zero-length write request for file %s, probably client error", file_ref->name.c_str());
     return 0;
   }
 
@@ -361,7 +372,7 @@ int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_na
   bl.append((const char*)input_buf, len);
   rc = context->setxattr(obj_name, attr_name, bl);
   if (rc) {
-    log_func((char*)"Can not get %s attr for for file %s -- too big\n", attr_name, name.c_str());
+    log((char*)"Can not get %s attr for for file %s -- too big\n", attr_name, name.c_str());
   }
   return rc;
 }
@@ -388,12 +399,12 @@ ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* att
   ceph::bufferlist bl;
   rc = context->getxattr(obj_name, attr_name, bl);
   if (rc < 0) {
-    log_func((char*)"Can not get %s attr for file %s -- %d\n", attr_name, obj_name.c_str(), rc);
+    log((char*)"Can not get %s attr for file %s -- %d\n", attr_name, obj_name.c_str(), rc);
     return rc;
   }
   size_t to_copy = bl.length();
   if (to_copy > buf_size) {
-    log_func((char*)"Can not fit %s attr of file %s to %lu bytes buffer -- too big (%lu bytes)\n", attr_name, name.c_str(), buf_size, to_copy);
+    log((char*)"Can not fit %s attr of file %s to %lu bytes buffer -- too big (%lu bytes)\n", attr_name, name.c_str(), buf_size, to_copy);
     return -E2BIG;
   } 
   bl.begin().copy(bl.length(), output_buf);
@@ -451,7 +462,7 @@ int XrdCephFileIOAdapter::truncate(librados::IoCtx* context) {
   }
   rc = context->trunc(obj_name, 0);
   if (rc != 0) {
-    log_func((char*)"Can not truncate first object of the file %s:  %d\n", name.c_str(), rc);
+    log((char*)"Can not truncate first object of the file %s:  %d\n", name.c_str(), rc);
   } 
   return rc;
 }
@@ -463,7 +474,7 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
   size_t obj_count = 0;
   int rc = 0;
   if (file_size < 0) {
-    log_func((char*)"Can not delete %s -- failed to get file size", name.c_str());
+    log((char*)"Can not delete %s -- failed to get file size", name.c_str());
     return (int)file_size;
   } else if (0 == file_size) {
     obj_count = 1; 
@@ -487,7 +498,7 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
     c.wait_for_complete();
     rc = std::min(rc, c.get_return_value());
     if (rc < 0 ) {
-      log_func((char*)"Can not delete %s -- object deletion failed %d\n", name.c_str(),  rc);
+      log((char*)"Can not delete %s -- object deletion failed %d\n", name.c_str(),  rc);
     }
   }
   return rc;

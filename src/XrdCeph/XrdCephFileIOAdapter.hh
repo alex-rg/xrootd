@@ -50,7 +50,7 @@ struct CephFileRef : CephFile {
 
 class XrdCephFileIOAdapter: public CephFileRef {
   //typedef std::tuple<ceph::bufferlist*, char*, int*> ReadOpData;
-  typedef void (*logfunc_pointer) (char *, ...);
+  typedef void (*logfunc_pointer) (char *, va_list args);
 
   /**
    * Class is used to execute io operations against rados striper files *without* usage of rados striper.
@@ -67,7 +67,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
    */
   public:
   XrdCephFileIOAdapter(logfunc_pointer ptr=NULL);
-  XrdCephFileIOAdapter(const CephFile file);
+  XrdCephFileIOAdapter(const CephFile file, logfunc_pointer ptr=NULL);
   ~XrdCephFileIOAdapter();
 
   void clear();
@@ -157,7 +157,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
   ssize_t get_numeric_attr(librados::IoCtx* context, const char* attr_name);
   ssize_t get_size(librados::IoCtx* context);
   ssize_t get_object_size(librados::IoCtx* context);
-  int log_xattrs(librados::IoCtx* context);
+
+  void log(char* format, ...);
 
   //map { <object_number> : <CephOpData> }
   std::map<size_t, CephReadOpData> read_operations;
