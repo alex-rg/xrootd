@@ -84,6 +84,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   int truncate(librados::IoCtx* context);
   int lock(librados::IoCtx* context,  time_t lock_timeout=6*3600);
   int unlock(librados::IoCtx* context);
+  int stat(librados::IoCtx* context, uint64_t* size, time_t* mtime);
   std::string lock_cookie;
   logfunc_pointer log_func;
 

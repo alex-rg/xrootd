@@ -675,14 +675,14 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
   librados::IoCtx *context = getIoCtx(fr);
 
   struct stat buf;
-  libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
+  /*libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
   if (NULL == striper) {
     logwrapper((char*)"Cannot create striper");  
     return -EINVAL;
-  }
+  }*/
   dumpClusterInfo(); // JW enhanced logging
 
-  int rc = striper->stat(fr.name, (uint64_t*)&(buf.st_size), &(buf.st_atime)); //Get details about a file
+  int rc = fr.stat(context, (uint64_t*)&(buf.st_size), &(buf.st_atime)); //Get details about a file
   
  
   bool fileExists = (rc != -ENOENT); //Make clear what condition we are testing
@@ -1280,13 +1280,12 @@ int ceph_posix_fstat(int fd, struct stat *buf) {
     // minimal stat : only size and times are filled
     // atime, mtime and ctime are set all to the same value
     // mode is set arbitrarily to 0666 | S_IFREG
-    libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
-    if (0 == striper) {
-      logwrapper((char*)"ceph_stat: getRadosStriper failed");
+    librados::IoCtx *ioctx = getIoCtx(*fr);
+    if (0 == ioctx) {
       return -EINVAL;
     }
     memset(buf, 0, sizeof(*buf));
-    int rc = striper->stat(fr->name, (uint64_t*)&(buf->st_size), &(buf->st_atime));
+    int rc = fr->stat(ioctx, (uint64_t*)&(buf->st_size), &(buf->st_atime));
     if (rc != 0) {
       return -rc;
     }
@@ -1307,12 +1306,13 @@ int ceph_posix_stat(XrdOucEnv* env, const char *pathname, struct stat *buf) {
   // atime, mtime and ctime are set all to the same value
   // mode is set arbitrarily to 0666 | S_IFREG
   CephFile file = getCephFile(pathname, env);
-  libradosstriper::RadosStriper *striper = getRadosStriper(file);
-  if (0 == striper) {
+  XrdCephFileIOAdapter io_adapter(file);
+  librados::IoCtx *ioctx = getIoCtx(io_adapter);
+  if (0 == ioctx) {
     return -EINVAL;
   }
   memset(buf, 0, sizeof(*buf));
-  int rc = striper->stat(file.name, (uint64_t*)&(buf->st_size), &(buf->st_atime));
+  int rc = io_adapter.stat(ioctx, (uint64_t*)&(buf->st_size), &(buf->st_atime));
   if (rc != 0) {
     // for non existing file. Check that we did not open it for write recently
     // in that case, we return 0 size and current time
