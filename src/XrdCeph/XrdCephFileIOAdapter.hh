@@ -58,26 +58,29 @@ class XrdCephFileIOAdapter: public CephFileRef {
    * 1. Instantiate the object.
    * 2. Declare read operations using 'read' method, providing the output buffers, offset and length.
    * 3. Submitn operation and wait for results using 'submit_and_wait_for_complete' method.
-   * 4. Copy results to buffers with 'get_results' method. 
+   * 4. Copy results to buffers with 'get_results' method.
    *
    * WARNING: there is no copy/move constructor in the class, so do not use temporary objects for initialization
    * (i.e. something like `XrdCephFileIOAdapter io = XrdCephFileIOAdapter(...);` will not work, use `XrdFileIOAdapter io(...);` instead).
-   */ 
+   */
   public:
   XrdCephFileIOAdapter(logfunc_pointer ptr=NULL);
   XrdCephFileIOAdapter(const CephFile file);
   ~XrdCephFileIOAdapter();
 
   void clear();
-  int wait_for_write_complete();
+  //int wait_for_write_complete();
   int submit_reads_and_wait_for_complete(librados::IoCtx* context);
   ssize_t get_read_results();
   //int read(void *out_buf, size_t size, off64_t offset);
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
-  int setxattr(librados::IoCtx* context, const char* name, const char *input_buf, size_t len);
-  logfunc_pointer log_func; 
+  int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
+  ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
+  int remove(librados::IoCtx* context);
+  int truncate(librados::IoCtx* context);
+  logfunc_pointer log_func;
 
   private:
   //Completion pointer
@@ -90,11 +93,13 @@ class XrdCephFileIOAdapter: public CephFileRef {
       if (NULL == ptr) {
         throw std::bad_alloc();
       }
+      //printf("Completion created: %p\n", ptr);
     }
     ~CmplPtr() {
       if (used) {
-        this->wait_for_complete();
+        ptr->wait_for_complete();
       }
+      //printf("Completion destroyed: %p\n", ptr);
       ptr->release();
     }
     void wait_for_complete() {
@@ -107,6 +112,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
       //If the object was converted to AioCompletion, we suppose it was passed to
       //the read or write operation, and therefore set the flag.
       used = true;
+      printf("Completion used: %p\n", ptr);
       return ptr;
     }
   };
@@ -129,20 +135,25 @@ class XrdCephFileIOAdapter: public CephFileRef {
   };
 
   //All data needed for an individual write request -- ceph's buffer and completion
-  struct WriteRequestData {
+  /*struct WriteRequestData {
     ceph::bufferlist bl;
     CmplPtr cmpl;
     WriteRequestData(const char* input_buf, size_t len);
-  };
+  };*/
 
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
   int get_object_name(size_t obj_idx, std::string& res);
   int addReadRequest(size_t obj_idx, char *buffer, size_t size, off64_t offset);
   int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, IoFuncPtr func);
+  int remove_objects(librados::IoCtx* context, bool keep_first=false);
+  ssize_t get_numeric_attr(librados::IoCtx* context, const char* attr_name);
+  ssize_t get_size(librados::IoCtx* context);
+  ssize_t get_object_size(librados::IoCtx* context);
+  int log_xattrs(librados::IoCtx* context);
 
   //map { <object_number> : <CephOpData> }
   std::map<size_t, CephReadOpData> read_operations;
-  std::map<size_t, WriteRequestData> write_operations;
+  //std::map<size_t, WriteRequestData> write_operations;
 
   //CephFile* file_info;
 };
