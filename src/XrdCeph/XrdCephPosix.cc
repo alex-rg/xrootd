@@ -449,7 +449,7 @@ static CephFile getCephFile(const char *path, XrdOucEnv *env) {
 
 static XrdCephFileIOAdapter getCephFileRef(const char *path, XrdOucEnv *env, int flags,
                                   mode_t mode, unsigned long long offset) {
-  XrdCephFileIOAdapter fr;
+  XrdCephFileIOAdapter fr(g_logfunc);
   fillCephFile(path, env, fr);
   fr.flags = flags;
   fr.mode = mode;
@@ -467,7 +467,7 @@ static XrdCephFileIOAdapter getCephFileRef(const char *path, XrdOucEnv *env, int
   fr.lastAsyncSubmission.tv_usec = 0;
   fr.longestAsyncWriteTime = 0.0l;
   fr.longestCallbackInvocation = 0.0l;
-  fr.log_func = logwrapper;
+  //fr.log_func = logwrapper;
   //Use hostname as lock cookie
   char hostname[MAX_LOCK_COOKIE_CHARS-10];
   char cookie[MAX_LOCK_COOKIE_CHARS];
@@ -1088,8 +1088,7 @@ int ceph_posix_stat(XrdOucEnv* env, const char *pathname, struct stat *buf) {
   // atime, mtime and ctime are set all to the same value
   // mode is set arbitrarily to 0666 | S_IFREG
   CephFile file = getCephFile(pathname, env);
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
     return -EINVAL;
@@ -1156,8 +1155,7 @@ static ssize_t ceph_posix_internal_getxattr(const CephFile &file, const char* na
   bl.begin().copy(returned_size, (char*)value);
   return returned_size;*/
 
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1186,8 +1184,7 @@ ssize_t ceph_posix_fgetxattr(int fd, const char* name,
 
 static ssize_t ceph_posix_internal_setxattr(const CephFile &file, const char* name,
                                             const void* value, size_t size, int flags) {
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1220,8 +1217,7 @@ int ceph_posix_fsetxattr(int fd,
 }
 
 static int ceph_posix_internal_removexattr(const CephFile &file, const char* name) {
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1248,8 +1244,7 @@ int ceph_posix_fremovexattr(int fd, const char* name) {
 }
 
 static int ceph_posix_internal_listxattrs(const CephFile &file, XrdSysXAttr::AList **aPL, int getSz) {
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1373,8 +1368,7 @@ int ceph_posix_stat_pool(char const *poolName, long long *usedSpace) {
 
 static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long size) {
 
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
@@ -1407,8 +1401,7 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
 
   // minimal stat : only size and times are filled
   CephFile file = getCephFile(pathname, env);
-  XrdCephFileIOAdapter io_adapter(file);
-  io_adapter.log_func = logwrapper;
+  XrdCephFileIOAdapter io_adapter(file, g_logfunc);
 
   librados::IoCtx *ioctx = getIoCtx(io_adapter);
   if (0 == ioctx) {
