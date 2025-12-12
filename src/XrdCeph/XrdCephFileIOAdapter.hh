@@ -72,11 +72,13 @@ class XrdCephFileIOAdapter: public CephFileRef {
   void clear();
   //int wait_for_write_complete();
   int submit_reads_and_wait_for_complete(librados::IoCtx* context);
+  int wait_for_write_complete();
   ssize_t get_read_results();
   //int read(void *out_buf, size_t size, off64_t offset);
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
+  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
   ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
@@ -140,11 +142,11 @@ class XrdCephFileIOAdapter: public CephFileRef {
   };
 
   //All data needed for an individual write request -- ceph's buffer and completion
-  /*struct WriteRequestData {
+  struct WriteRequestData {
     ceph::bufferlist bl;
     CmplPtr cmpl;
     WriteRequestData(const char* input_buf, size_t len);
-  };*/
+  };
 
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
   int get_object_name(size_t obj_idx, std::string& res);
@@ -159,7 +161,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
 
   //map { <object_number> : <CephOpData> }
   std::map<size_t, CephReadOpData> read_operations;
-  //std::map<size_t, WriteRequestData> write_operations;
+  std::map<size_t, WriteRequestData> write_operations;
 
   //CephFile* file_info;
 };

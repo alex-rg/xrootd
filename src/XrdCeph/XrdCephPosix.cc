@@ -697,6 +697,11 @@ int ceph_posix_close(int fd) {
   if (fr) {
     if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is WRITE
       //Write object size to file attributes
+      rc = fr->wait_for_write_complete();
+      if (rc != 0) {
+        logwrapper((char*)"Can not write file %s -- %d\n", fr->name.c_str(), rc);
+      }
+
       std::list<std::pair<const char*, unsigned long long>> attr_data = {
           {"striper.layout.object_size", fr->objectSize},
           {"striper.layout.stripe_unit", fr->stripeUnit},
