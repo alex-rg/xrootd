@@ -73,7 +73,9 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
    */
   int rc = 0;
   try{
-    auto &op_data = read_operations[obj_idx];
+    //Make sure no movement is done
+    read_operations.emplace(std::piecewise_construct, std::make_tuple(obj_idx), std::make_tuple());
+    auto &op_data = read_operations.at(obj_idx);
     //When we start using C++17, the next two lines can be merged
     op_data.read_buffers.emplace_back(buffer);
     auto &buf = op_data.read_buffers.back();
