@@ -65,6 +65,7 @@ BuildRequires:	libasan
 
 %if %{with ceph}
 BuildRequires:	librados-devel
+BuildRequires:	libradospp-devel
 %endif
 
 %if %{with clang}
