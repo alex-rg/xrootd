@@ -6,7 +6,7 @@
 
 find_path(
   RADOS_INCLUDE_DIR
-  rados/librados.h
+  rados/librados.hpp
   HINTS
   ${CEPH_DIR}
   $ENV{CEPH_DIR}
