@@ -6,24 +6,13 @@
 
 find_path(
   RADOS_INCLUDE_DIR
-  radosstriper/libradosstriper.hpp
+  rados/librados.h
   HINTS
   ${CEPH_DIR}
   $ENV{CEPH_DIR}
   /usr
   /opt
   PATH_SUFFIXES include
-)
-
-find_library(
-  RADOSSTRIPER_LIB
-  NAMES radosstriper
-  HINTS
-  ${CEPH_DIR}
-  $ENV{CEPH_DIR}
-  /usr
-  /opt
-  PATH_SUFFIXES lib
 )
 
 find_library(
@@ -37,7 +26,7 @@ find_library(
   PATH_SUFFIXES lib
 )
 
-set(RADOS_LIBS ${RADOS_LIB} ${RADOSSTRIPER_LIB})
+set(RADOS_LIBS ${RADOS_LIB})
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(ceph REQUIRED_VARS RADOS_INCLUDE_DIR RADOS_LIB RADOSSTRIPER_LIB)
+find_package_handle_standard_args(ceph REQUIRED_VARS RADOS_INCLUDE_DIR RADOS_LIB)
