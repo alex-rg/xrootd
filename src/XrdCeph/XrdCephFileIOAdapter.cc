@@ -279,7 +279,7 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
         log((char*)"Unable to write block %u synchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
         return rc;
       }
-    } else if (OP_WRITE_SYNC == op_type) {
+    } else if (OP_WRITE_ASYNC == op_type) {
       rc = write_block_async(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
         log((char*)"Unable to write block %u asynchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
