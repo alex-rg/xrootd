@@ -101,13 +101,11 @@ class XrdCephFileIOAdapter: public CephFileRef {
       if (NULL == ptr) {
         throw std::bad_alloc();
       }
-      //printf("Completion created: %p\n", ptr);
     }
     ~CmplPtr() {
       if (used) {
         ptr->wait_for_complete();
       }
-      //printf("Completion destroyed: %p\n", ptr);
       ptr->release();
     }
     void wait_for_complete() {
@@ -120,7 +118,6 @@ class XrdCephFileIOAdapter: public CephFileRef {
       //If the object was converted to AioCompletion, we suppose it was passed to
       //the read or write operation, and therefore set the flag.
       used = true;
-      printf("Completion used: %p\n", ptr);
       return ptr;
     }
   };
