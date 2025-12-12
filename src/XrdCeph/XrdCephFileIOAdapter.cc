@@ -21,9 +21,9 @@ XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file, logfunc_pointer 
   log_func = ptr;
 };
 
-/*XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
+XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len) {
   bl.append(input_buf, len);
-}*/
+}
 
 XrdCephFileIOAdapter::CephReadOpData::CephReadOpData(const XrdCephFileIOAdapter::CephReadOpData& data) {
   throw std::runtime_error("CephReadOpData: copy constructor called");
@@ -103,7 +103,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
 }
 }*/
 
-/*int XrdCephFileIOAdapter::wait_for_write_complete() {
+int XrdCephFileIOAdapter::wait_for_write_complete() {
   int ret = 0;
   for (auto &buf_data: write_operations) {
     buf_data.second.cmpl.wait_for_complete();
@@ -114,7 +114,7 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
     }
   }
   return ret;
-}*/
+}
 
 int XrdCephFileIOAdapter::submit_reads_and_wait_for_complete(librados::IoCtx* context) {
   /**
@@ -191,6 +191,25 @@ int XrdCephFileIOAdapter::read(librados::IoCtx* context, void* out_buf, size_t r
   return io_req_block_loop(context, out_buf, req_size, offset, OP_READ);
 }
 
+ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
+  std::string obj_name;
+  ssize_t rc = 0;
+  rc = get_object_name(block_num, obj_name);
+  if (rc) {
+    return rc;
+  }
+  try{
+    //Make sure no movement is done
+    write_operations.emplace(std::piecewise_construct, std::make_tuple(block_num), std::make_tuple(input_buf, req_size));
+    auto &op_data = write_operations.at(block_num);
+    rc = context->aio_write(obj_name, op_data.cmpl.use(), op_data.bl, req_size, offset);
+  } catch (std::bad_alloc&) {
+    log((char*)"Memory allocation failed while reading file %s", name.c_str());
+    return -ENOMEM;
+  }
+  return rc;
+}
+
 ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
   std::string obj_name;
   ssize_t rc = 0;
@@ -205,7 +224,7 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
 }
 
 ssize_t XrdCephFileIOAdapter::write(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset) {
-  return io_req_block_loop(context, (void*)input_buf, req_size, offset, OP_WRITE_SYNC);
+  return io_req_block_loop(context, (void*)input_buf, req_size, offset, OP_WRITE_ASYNC);
 }
 
 int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type) {
@@ -258,6 +277,12 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
       rc = write_block_sync(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
         log((char*)"Unable to write block %u synchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
+        return rc;
+      }
+    } else if (OP_WRITE_SYNC == op_type) {
+      rc = write_block_async(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
+      if (rc < 0) {
+        log((char*)"Unable to write block %u asynchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
         return rc;
       }
     }
