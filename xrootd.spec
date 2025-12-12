@@ -66,7 +66,6 @@ BuildRequires:	libasan
 
 %if %{with ceph}
 BuildRequires:	librados-devel
-BuildRequires:	libradosstriper-devel
 %endif
 
 %if %{with clang}
