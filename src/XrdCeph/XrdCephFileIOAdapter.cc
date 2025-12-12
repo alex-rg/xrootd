@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stdexcept>
 #include "XrdCephFileIOAdapter.hh"
 
 void XrdCephFileIOAdapter::log(char* format, ...) {
@@ -25,8 +26,7 @@ XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file, logfunc_pointer 
 }*/
 
 XrdCephFileIOAdapter::CephReadOpData::CephReadOpData(const XrdCephFileIOAdapter::CephReadOpData& data) {
-  cmpl = data.cmpl;
-  read_buffers = std::list<ReadRequestData>(data.read_buffers);
+  throw std::runtime_error("CephReadOpData: copy constructor called");
 }
 
 XrdCephFileIOAdapter::XrdCephFileIOAdapter(logfunc_pointer logwrapper) {
