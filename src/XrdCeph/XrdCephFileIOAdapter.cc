@@ -109,7 +109,7 @@ int XrdCephFileIOAdapter::wait_for_write_complete() {
     buf_data.second.cmpl.wait_for_complete();
     int ret = buf_data.second.cmpl.get_return_value();
     if (ret != 0) {
-      log((char*)"Write for file %s failed\n", name.c_str());
+      log((char*)"Write for file %s (obj %llu) failed: %d\n", name.c_str(), buf_data.first, ret);
       break;
     }
   }
@@ -192,6 +192,15 @@ int XrdCephFileIOAdapter::read(librados::IoCtx* context, void* out_buf, size_t r
 }
 
 ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
+  if (offset != 0) {
+    log(
+      (char*)"Writing to file %s rejected -- can only write full objects at offset 0, got offset %llu (block %llu)",
+      name.c_str(),
+      offset,
+      block_num
+    );
+    return -EFAULT;
+  }
   std::string obj_name;
   ssize_t rc = 0;
   rc = get_object_name(block_num, obj_name);
@@ -202,9 +211,9 @@ ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t
     //Make sure no movement is done
     write_operations.emplace(std::piecewise_construct, std::make_tuple(block_num), std::make_tuple(input_buf, req_size));
     auto &op_data = write_operations.at(block_num);
-    rc = context->aio_write(obj_name, op_data.cmpl.use(), op_data.bl, req_size, offset);
+    rc = context->aio_write_full(obj_name, op_data.cmpl.use(), op_data.bl);
   } catch (std::bad_alloc&) {
-    log((char*)"Memory allocation failed while reading file %s", name.c_str());
+    log((char*)"Memory allocation failed while writing file %s async", name.c_str());
     return -ENOMEM;
   }
   return rc;
