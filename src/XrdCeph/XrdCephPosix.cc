@@ -668,16 +668,23 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
     }
     if (fileExists) {
       if (flags & O_TRUNC) {
-        rc = ceph_posix_unlink(env, pathname);
+        rc = fr.truncate(context);
         if (rc < 0 && rc != -ENOENT) {
-          return rc;
+          logwrapper((char*)"Truncate of file %s failed: %d", pathname, rc);
         }
       } else {
         if (flags & O_EXCL) {
-          return -EACCES; // permission denied
+          rc = -EACCES; // permission denied
         } else {
-          return -EEXIST; // otherwise return just file exists
+          rc = -EEXIST; // otherwise return just file exists
         }
+      }
+      int rc1 = fr.unlock(context);
+      if (rc1 != 0) {
+        logwrapper((char*)"Unlock of file %s failed: %d", pathname, rc);
+      }
+      if (rc != 0) {
+        return rc;
       }
     }
     // At this point, we know either the target file didn't exist, or the ceph_posix_unlink above removed it
@@ -1412,18 +1419,28 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
   if (0 == ioctx) {
     return -EINVAL;
   }
-  io_adapter.lock(ioctx);
-  int rc = io_adapter.remove(ioctx);
-  io_adapter.unlock(ioctx);
+  int rc = io_adapter.lock(ioctx);
+  if (rc < 0) {
+    logwrapper((char*)"Unable to lock file %s", pathname);
+    return -ENOLCK;
+  }
+  rc = io_adapter.remove(ioctx);
   auto end = std::chrono::steady_clock::now();
   auto deltime_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - timer_start).count();
 
   if (rc == 0) {
       logwrapper((char*)"ceph_posix_unlink : %s unlink successful: %d ms", pathname, deltime_ms);
       return 0;
-  }
-  if (rc != -EBUSY) {
-    logwrapper((char*)"ceph_posix_unlink : %s unlink failed: %d ms; return code %d", pathname, deltime_ms, rc);
+  } else {
+    if (rc != -EBUSY) {
+      logwrapper((char*)"ceph_posix_unlink : %s unlink failed: %d ms; return code %d", pathname, deltime_ms, rc);
+    }
+    rc = io_adapter.unlock(ioctx);
+    if (rc != 0) {
+      logwrapper((char*)"ceph_posix_unlink : %s unlock failed; return code %d", pathname, rc);
+    } else {
+      logwrapper((char*)"ceph_posix_unlink : %s unlock succeeded", pathname, rc);
+    }
     return rc; 
   }
   /*// if EBUSY returned, assume the file is locked; so try to remove the lock
