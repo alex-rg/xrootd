@@ -661,16 +661,18 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
     }
 
   } else {                              // Access mode is WRITE
-    rc = fr.lock(context);
-    if (rc < 0) {
-      logwrapper((char*)"Unable to lock file %s", pathname);
-      return -ENOLCK;
-    }
     if (fileExists) {
       if (flags & O_TRUNC) {
-        rc = fr.truncate(context);
-        if (rc < 0 && rc != -ENOENT) {
-          logwrapper((char*)"Truncate of file %s failed: %d", pathname, rc);
+        rc = fr.lock(context);
+        if (rc < 0) {
+          logwrapper((char*)"Unable to lock file %s for removal", pathname);
+          return -ENOLCK;
+        }
+        rc = fr.remove(context);
+        if (0 == rc) {
+          logwrapper((char*)"Removal of file %s on opening succeeded", pathname);
+	} else {
+          logwrapper((char*)"Removal of file %s on opening failed: %d", pathname, rc);
         }
       } else {
         if (flags & O_EXCL) {
@@ -680,14 +682,15 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
         }
       }
       if (rc != 0) {
-        int rc1 = fr.unlock(context);
-        if (rc1 != 0) {
-          logwrapper((char*)"Unlock of file %s failed: %d", pathname, rc);
-        }
         return rc;
       }
     }
     // At this point, we know either the target file didn't exist, or the ceph_posix_unlink above removed it
+    rc = fr.lock(context);
+    if (rc < 0) {
+      logwrapper((char*)"Unable to lock file %s", pathname);
+      return -ENOLCK;
+    }
     int fd = insertFileRef(fr);
     logwrapper((char*)"File descriptor %d associated to file %s opened in write mode", fd, pathname);
     return fd;
