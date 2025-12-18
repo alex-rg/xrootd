@@ -521,7 +521,7 @@ int XrdCephFileIOAdapter::lock(librados::IoCtx* context, time_t lock_timeout) {
   struct timeval tv;
   tv.tv_sec = lock_timeout;
   tv.tv_usec = 0;
-  return context->lock_exclusive(obj_name, "striper.lock", lock_cookie, "", &tv, 0); 
+  return context->lock_exclusive(obj_name, lock_name, lock_cookie, "", &tv, 0);
 }
 
 int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
@@ -531,7 +531,41 @@ int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
     return rc;
   }
 
-  return context->unlock(obj_name, "striper.lock", lock_cookie); 
+  rc = context->unlock(obj_name, lock_name, lock_cookie);
+  if (rc == -ENOENT) {
+    //If lock has the same cookie but different client (obtained via different context)
+    //we just break it
+    std::list<librados::locker_t> lockers;
+    int exclusive;
+    std::string tag;
+    int rc1 = context->list_lockers(obj_name, lock_name, &exclusive, &tag, &lockers);
+    if (0 == rc && 1== exclusive && "" == tag && 1 == lockers.size()){
+      auto locker = lockers.front();
+      if (locker.cookie == lock_cookie) {
+        log(
+            (char*)"Trying to break lock for object %s with cookie %s (same as mine) and client %s",
+            obj_name.c_str(),
+            lock_cookie.c_str(),
+            locker.client.c_str()
+          );
+        rc1 = context->break_lock(obj_name, lock_name, locker.client, lock_cookie);
+        std::string outcome = "";
+        if (0 == rc1) {
+          outcome = "succeeded";
+          rc = 0;
+        } else {
+          outcome = "failed";
+        }
+        log((char*)"Breaking lock for object %s with cookie %s and client %s %s",
+            obj_name.c_str(),
+            lock_cookie.c_str(),
+            locker.client.c_str(),
+	    outcome.c_str()
+          );
+      }
+    }
+  }
+  return rc;
 }
 
 int XrdCephFileIOAdapter::stat(librados::IoCtx* context, uint64_t* size, time_t* mtime) {
