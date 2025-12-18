@@ -539,7 +539,7 @@ int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
     int exclusive;
     std::string tag;
     int rc1 = context->list_lockers(obj_name, lock_name, &exclusive, &tag, &lockers);
-    if (0 == rc && 1== exclusive && "" == tag && 1 == lockers.size()){
+    if (rc1 > 0 && 1 == exclusive && "" == tag && 1 == lockers.size()){
       auto locker = lockers.front();
       if (locker.cookie == lock_cookie) {
         log(
