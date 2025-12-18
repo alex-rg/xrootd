@@ -156,6 +156,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   ssize_t get_numeric_attr(librados::IoCtx* context, const char* attr_name);
   ssize_t get_size(librados::IoCtx* context);
   ssize_t get_object_size(librados::IoCtx* context);
+  std::string lock_name = "striper.lock";
 
   void log(char* format, ...);
 
