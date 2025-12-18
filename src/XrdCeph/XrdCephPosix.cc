@@ -679,11 +679,11 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
           rc = -EEXIST; // otherwise return just file exists
         }
       }
-      int rc1 = fr.unlock(context);
-      if (rc1 != 0) {
-        logwrapper((char*)"Unlock of file %s failed: %d", pathname, rc);
-      }
       if (rc != 0) {
+        int rc1 = fr.unlock(context);
+        if (rc1 != 0) {
+          logwrapper((char*)"Unlock of file %s failed: %d", pathname, rc);
+        }
         return rc;
       }
     }
