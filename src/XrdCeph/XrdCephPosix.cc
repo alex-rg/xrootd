@@ -886,7 +886,33 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  return -ENOTSUP;
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
+  if (fr) {
+    // get the parameters from the Xroot aio object
+    size_t count = aiop->sfsAio.aio_nbytes;
+    const char *buf = (const char*)aiop->sfsAio.aio_buf;
+    size_t offset = aiop->sfsAio.aio_offset;
+    // TODO implement proper logging level for this plugin - this should be only debug
+    //logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
+    if ((fr->flags & O_ACCMODE) == O_RDONLY) {
+      return -EBADF;
+    }
+    // get the context pointer
+    librados::IoCtx *ioctx = getIoCtx(*fr);
+    if (0 == ioctx) {
+      return -EINVAL;
+    }
+    // prepare callback argument and do async call
+    AioArgs *args = new AioArgs(aiop, cb, count, fd);
+    int rc = fr->write_aio(ioctx, buf, count, offset, args, ceph_aio_write_complete);
+    XrdSysMutexHelper lock(fr->statsMutex);
+    fr->asyncWrStartCount++;
+    ::gettimeofday(&fr->lastAsyncSubmission, nullptr);
+    fr->bytesAsyncWritePending+=count;
+    return rc;
+  } else {
+    return -EBADF;
+  }
 }
 
 ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
