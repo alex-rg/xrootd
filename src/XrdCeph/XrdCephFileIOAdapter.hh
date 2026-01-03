@@ -78,7 +78,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
-  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
+  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
+  ssize_t write_aio(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
   ssize_t getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t len);
@@ -98,8 +99,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
     librados::AioCompletion *ptr;
     bool used = false;
     public:
-    CmplPtr() {
-      ptr = librados::Rados::aio_create_completion();
+    CmplPtr(void* arg=NULL, librados::callback_t callback=NULL) {
+      ptr = librados::Rados::aio_create_completion(arg, callback);
       if (NULL == ptr) {
         throw std::bad_alloc();
       }
@@ -124,6 +125,34 @@ class XrdCephFileIOAdapter: public CephFileRef {
     }
   };
 
+  /*
+  class MultiAIOCmplPtr {
+    std::list<CmplPtr> completion_list;
+    size_t ops_executed = 0;
+    size_t ops_registered = 0;
+    bool all_submitted = false;
+    void* c_arg = NULL;
+    librados::callback_t g_callback = NULL;
+    MultiAIOCmplPtr(void* arg, librados::callback_t callback) {
+      g_callback = callback;
+      c_arg = arg;
+    }
+
+    static void callback_wrapper(void* arg) {
+      MultiAIOCmplPtr* ptr = (MultiAIOCmplPtr*) arg;
+      if (ptr->ops_executed == ptr->ops_registered && all_submitted) {
+	ptr->g_callback(ptr->c_arg);
+      }
+    }
+    librados::AioCompletion* use() {
+      completion_list.emplace_back(this, callback_wrapper);
+      return completion_list.back().use();
+    }
+    void submissionDone() {
+      all_submitted = true;
+    }
+  };*/
+
   //Data for an individual read -- ceph's buffer, client's buffer and return code
   struct ReadRequestData {
     ceph::bufferlist bl;
@@ -145,13 +174,13 @@ class XrdCephFileIOAdapter: public CephFileRef {
   struct WriteRequestData {
     ceph::bufferlist bl;
     CmplPtr cmpl;
-    WriteRequestData(const char* input_buf, size_t len);
+    WriteRequestData(const char* input_buf, size_t len, void* arg=NULL, librados::callback_t g_callback = NULL);
   };
 
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
   int get_object_name(size_t obj_idx, std::string& res);
   int addReadRequest(size_t obj_idx, char *buffer, size_t size, off64_t offset);
-  int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type);
+  int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type, void* arg=NULL, librados::callback_t callback=NULL);
   int remove_objects(librados::IoCtx* context, bool keep_first=false);
   ssize_t get_numeric_attr(librados::IoCtx* context, const char* attr_name);
   ssize_t get_size(librados::IoCtx* context);
