@@ -1072,15 +1072,10 @@ ssize_t ceph_posix_maybestriper_pread(int fd, void *buf, size_t count, off64_t o
 
 
 static void ceph_aio_read_complete(rados_completion_t c, void *arg) {
-  AioArgs *awa = reinterpret_cast<AioArgs*>(arg);
-  size_t rc = rados_aio_get_return_value(c);
-  if (awa->bl) {
-    if (rc > 0) {
-      awa->bl->begin().copy(rc, (char*)awa->aiop->sfsAio.aio_buf);
-    }
-    delete awa->bl;
-    awa->bl = 0;
-  }
+  std::pair<ssize_t, void*> *arg_tuple = reinterpret_cast<std::pair<ssize_t, void*>*>(arg);
+  AioArgs *awa = reinterpret_cast<AioArgs*>(arg_tuple->second);
+  ssize_t rc = arg_tuple->first;
+
   // Compute statistics before reportng to xrootd, so that a close cannot happen
   // in the meantime.
   XrdCephFileIOAdapter* fr = getFileRef(awa->fd);
@@ -1093,7 +1088,28 @@ static void ceph_aio_read_complete(rados_completion_t c, void *arg) {
 }
 
 ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
-  return -ENOTSUP;
+  XrdCephFileIOAdapter* fr = getFileRef(fd);
+  if (fr) {
+    // TODO implement proper logging level for this plugin - this should be only debug
+    //logwrapper((char*)"ceph_aio_read: for fd %d, count=%d", fd, count);
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
+      return -EBADF;
+    }
+    librados::IoCtx *ioctx = getIoCtx(*fr);
+    if (0 == ioctx) {
+      return -EINVAL;
+    }
+    // get the parameters from the Xroot aio object
+    size_t count = aiop->sfsAio.aio_nbytes;
+    size_t offset = aiop->sfsAio.aio_offset;
+    AioArgs *args = new AioArgs(aiop, cb, count, fd, 0);
+    int rc = fr->read_aio(ioctx, (void*)aiop->sfsAio.aio_buf, count, offset, (void*)args, &ceph_aio_read_complete);
+    XrdSysMutexHelper lock(fr->statsMutex);
+    fr->asyncRdStartCount++;
+    return rc;
+  } else {
+    return -EBADF;
+  }
 }
 
 int ceph_posix_fstat(int fd, struct stat *buf) {

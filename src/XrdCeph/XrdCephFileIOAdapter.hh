@@ -2,6 +2,7 @@
 #include <map>
 #include <list>
 #include <tuple>
+#include <atomic>
 #include <rados/librados.hpp>
 
 #include "XrdSys/XrdSysPthread.hh"
@@ -11,10 +12,24 @@
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
 
+typedef std::atomic<size_t> atomic_size_t;
+typedef std::atomic<ssize_t> atomic_ssize_t;
+
 enum OpType {
   OP_READ,
+  OP_READ_ASYNC,
   OP_WRITE_SYNC,
   OP_WRITE_ASYNC
+};
+
+struct readCallbackWrapperArg {
+  char* buf = NULL;
+  atomic_size_t* total_bytes_read = 0;
+  atomic_ssize_t* rc = 0;
+  size_t total_read_size = 0;
+  ceph::bufferlist bl;
+  librados::callback_t callback = NULL;
+  void* callback_arg = NULL;
 };
 
 struct CephFile {
@@ -71,12 +86,16 @@ class XrdCephFileIOAdapter: public CephFileRef {
 
   void clear();
   //int wait_for_write_complete();
+  int submit_reads(librados::IoCtx* context);
+  int wait_for_read_complete();
   int submit_reads_and_wait_for_complete(librados::IoCtx* context);
   int wait_for_write_complete();
   ssize_t get_read_results();
   //int read(void *out_buf, size_t size, off64_t offset);
   //ssize_t write(const void *in_buf, size_t size, off64_t offset);
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
+  int read_aio(librados::IoCtx* context, void* out_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
+  ssize_t read_block_async(librados::IoCtx* context, size_t block_num, size_t req_size, off64_t offset,  readCallbackWrapperArg* arg);
   ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
   ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t write_aio(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
@@ -123,6 +142,11 @@ class XrdCephFileIOAdapter: public CephFileRef {
       used = true;
       return ptr;
     }
+    librados::AioCompletion* access() {
+      //Access PTR but do not record it. Use with care!
+      return ptr;
+    }
+
   };
 
   /*
@@ -161,7 +185,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
     ReadRequestData(char* output_buf): out_buf(output_buf), rc(-1) {};
   };
 
-  //All data neaded for individual read operation
+  //All data neaded for individual read operation (i.e. vector read for a ceph object)
   struct CephReadOpData {
     librados::ObjectReadOperation ceph_read_op;
     CmplPtr cmpl;
