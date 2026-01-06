@@ -11,6 +11,26 @@ void XrdCephFileIOAdapter::log(char* format, ...) {
   }
 }
 
+void callback_wrapper(rados_completion_t cmpl, void* val) {
+  readCallbackWrapperArg* arg = reinterpret_cast<readCallbackWrapperArg*>(val);
+  ssize_t ret = rados_aio_get_return_value(cmpl);
+  if (ret > 0) {
+    arg->bl.begin().copy(ret, arg->buf);
+    *(arg->total_bytes_read) += (atomic_size_t)ret;
+  } else if (ret <0) {
+    *(arg->rc) = ret;
+  }
+  if (*(arg->total_bytes_read) == arg->total_read_size) {
+    if (arg->callback) {
+      std::pair<ssize_t, void*> rc_and_arg((ssize_t)arg->rc, arg->callback_arg);
+      (*(arg->callback))(NULL, &rc_and_arg);
+    }
+    delete arg->rc;
+    delete arg->total_bytes_read;
+  }
+  delete arg;
+}
+
 XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file, logfunc_pointer ptr) {
   name = file.name;
   pool = file.pool;
@@ -191,6 +211,22 @@ int XrdCephFileIOAdapter::read(librados::IoCtx* context, void* out_buf, size_t r
   return io_req_block_loop(context, out_buf, req_size, offset, OP_READ);
 }
 
+int XrdCephFileIOAdapter::read_aio(librados::IoCtx* context, void* out_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback) {
+  return io_req_block_loop(context, out_buf, req_size, offset, OP_READ_ASYNC, arg, callback);
+}
+
+ssize_t XrdCephFileIOAdapter::read_block_async(librados::IoCtx* context, size_t block_num, size_t req_size, off64_t offset,  readCallbackWrapperArg* arg) {
+  std::string obj_name;
+  ssize_t rc = 0;
+  rc = get_object_name(block_num, obj_name);
+  if (rc) {
+    return rc;
+  }
+  CmplPtr cmpl(arg, callback_wrapper);
+  rc = context->aio_read(obj_name, cmpl.access(), &arg->bl, req_size, offset);
+  return rc;
+}
+
 ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* callback_arg, librados::callback_t callback_func) {
   if (offset != 0) {
     log(
@@ -262,8 +298,25 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
     return 0;
   }
 
-  char* const buf_start_ptr = (char*) buf;
+  //Some stuff for async read
+  atomic_size_t* total_bytes_read = NULL;
+  atomic_ssize_t* async_rc = NULL;
+  readCallbackWrapperArg base_callback_data;
+  readCallbackWrapperArg* outer_callback_arg;
+  if (OP_READ_ASYNC == op_type) {
+    total_bytes_read = new atomic_size_t;
+    async_rc = new atomic_ssize_t;
+    *total_bytes_read = 0;
+    *async_rc = 0;
 
+    base_callback_data.total_bytes_read = total_bytes_read;
+    base_callback_data.total_read_size = req_size;
+    base_callback_data.rc = async_rc;
+    base_callback_data.callback = callback;
+    base_callback_data.callback_arg = arg;
+  }
+
+  char* const buf_start_ptr = (char*) buf;
   //The amount of bytes that is yet to be read
   size_t to_process = req_size;
   //block means ceph object here
@@ -286,6 +339,10 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
         log((char*)"Unable to submit async read request, rc=%d, file=%s\n", rc, name.c_str());
         return rc;
       }
+    } else if (OP_READ_ASYNC == op_type) {
+      outer_callback_arg = new readCallbackWrapperArg(base_callback_data);
+      outer_callback_arg->buf = buf_start_ptr + buf_pos;
+      rc = read_block_async(context, start_block, chunk_len, chunk_start, outer_callback_arg);
     } else if (OP_WRITE_SYNC == op_type) {
       rc = write_block_sync(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start);
       if (rc < 0) {
