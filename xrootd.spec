@@ -457,8 +457,8 @@ install -m 644 -p packaging/common/%{name}.pp \
 
 %ldconfig_scriptlets server-libs
 
-%pre server
-%sysusers_create_compat %(tar -z -x -f %{SOURCE0} --no-anchored xrootd-sysusers.conf -O > /tmp/xrootd-sysusers.conf && echo /tmp/xrootd-sysusers.conf)
+#%pre server
+#%sysusers_create_compat %(tar -z -x -f %{SOURCE0} --no-anchored xrootd-sysusers.conf -O > /tmp/xrootd-sysusers.conf && echo /tmp/xrootd-sysusers.conf)
 
 %post server
 %tmpfiles_create %{_tmpfilesdir}/%{name}.conf
