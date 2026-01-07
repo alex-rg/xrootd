@@ -256,6 +256,15 @@ ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t
 }
 
 ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
+  if (offset != 0) {
+    log(
+      (char*)"Writing (sync) to file %s rejected -- can only write full objects at offset 0, got offset %llu (block %llu)",
+      name.c_str(),
+      offset,
+      block_num
+    );
+    return -EFAULT;
+  }
   std::string obj_name;
   ssize_t rc = 0;
   rc = get_object_name(block_num, obj_name);
@@ -264,7 +273,7 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
   }
   ceph::bufferlist bl;
   bl.append(input_buf, req_size);
-  rc = context->write(obj_name, bl, req_size, offset);
+  rc = context->write_full(obj_name, bl);
   return rc;
 }
 
