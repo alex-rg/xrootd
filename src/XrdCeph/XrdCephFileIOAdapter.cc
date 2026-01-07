@@ -22,7 +22,7 @@ void callback_wrapper(rados_completion_t cmpl, void* val) {
   }
   if (*(arg->total_bytes_read) == arg->total_read_size) {
     if (arg->callback) {
-      std::pair<ssize_t, void*> rc_and_arg((ssize_t)arg->rc, arg->callback_arg);
+      std::pair<ssize_t, void*> rc_and_arg(arg->total_read_size, arg->callback_arg);
       (*(arg->callback))(NULL, &rc_and_arg);
     }
     delete arg->rc;

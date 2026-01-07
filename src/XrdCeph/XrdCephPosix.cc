@@ -62,14 +62,13 @@ struct DirIterator {
 
 /// small struct for aio API callbacks
 struct AioArgs {
-  AioArgs(XrdSfsAio* a, AioCB *b, size_t n, int _fd, ceph::bufferlist *_bl=0) :
-    aiop(a), callback(b), nbBytes(n), fd(_fd), bl(_bl) { ::gettimeofday(&startTime, nullptr); }
+  AioArgs(XrdSfsAio* a, AioCB *b, size_t n, int _fd) :
+    aiop(a), callback(b), nbBytes(n), fd(_fd) { ::gettimeofday(&startTime, nullptr); }
   XrdSfsAio* aiop;
   AioCB *callback;
   size_t nbBytes;
   int fd;
   ::timeval startTime;
-  ceph::bufferlist *bl;
 };
 
 /// global variables holding ioCtxs/cluster objects
@@ -1102,7 +1101,7 @@ ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
     // get the parameters from the Xroot aio object
     size_t count = aiop->sfsAio.aio_nbytes;
     size_t offset = aiop->sfsAio.aio_offset;
-    AioArgs *args = new AioArgs(aiop, cb, count, fd, 0);
+    AioArgs *args = new AioArgs(aiop, cb, count, fd);
     int rc = fr->read_aio(ioctx, (void*)aiop->sfsAio.aio_buf, count, offset, (void*)args, &ceph_aio_read_complete);
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->asyncRdStartCount++;
