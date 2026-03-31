@@ -96,8 +96,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   int read_aio(librados::IoCtx* context, void* out_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t read_block_async(librados::IoCtx* context, size_t block_num, size_t req_size, off64_t offset,  readCallbackWrapperArg* arg);
-  ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
-  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
+  ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, bool write_full=false);
+  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback, bool write_full=false);
   ssize_t write_aio(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
@@ -198,7 +198,9 @@ class XrdCephFileIOAdapter: public CephFileRef {
   struct WriteRequestData {
     ceph::bufferlist bl;
     CmplPtr cmpl;
-    WriteRequestData(const char* input_buf, size_t len, void* arg=NULL, librados::callback_t g_callback = NULL);
+    size_t obj;
+    size_t offset;
+    WriteRequestData(const char* input_buf, size_t len, size_t offset=0, size_t obj_num=0, void* arg=NULL, librados::callback_t g_callback = NULL);
   };
 
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
@@ -215,7 +217,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
 
   //map { <object_number> : <CephOpData> }
   std::map<size_t, CephReadOpData> read_operations;
-  std::map<size_t, WriteRequestData> write_operations;
+  std::list<WriteRequestData> write_operations;
 
   //CephFile* file_info;
 };
