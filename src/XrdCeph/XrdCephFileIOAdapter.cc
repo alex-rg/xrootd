@@ -41,7 +41,7 @@ XrdCephFileIOAdapter::XrdCephFileIOAdapter(const CephFile file, logfunc_pointer 
   log_func = ptr;
 };
 
-XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len, void* arg, librados::callback_t callback): cmpl(arg, callback) {
+XrdCephFileIOAdapter::WriteRequestData::WriteRequestData(const char* input_buf, size_t len, size_t offst, size_t obj_num, void* arg, librados::callback_t callback): cmpl(arg, callback), obj(obj_num), offset(offst) {
   bl.append(input_buf, len);
 }
 
@@ -126,10 +126,10 @@ int XrdCephFileIOAdapter::addReadRequest(size_t obj_idx, char* buffer, size_t si
 int XrdCephFileIOAdapter::wait_for_write_complete() {
   int ret = 0;
   for (auto &buf_data: write_operations) {
-    buf_data.second.cmpl.wait_for_complete();
-    int ret = buf_data.second.cmpl.get_return_value();
+    buf_data.cmpl.wait_for_complete();
+    int ret = buf_data.cmpl.get_return_value();
     if (ret != 0) {
-      log((char*)"Write for file %s (obj %llu) failed: %d\n", name.c_str(), buf_data.first, ret);
+      log((char*)"Write for file %s (obj %llu, offset %llu) failed: %d\n", name.c_str(), buf_data.obj, buf_data.offset, ret);
       break;
     }
   }
@@ -227,8 +227,8 @@ ssize_t XrdCephFileIOAdapter::read_block_async(librados::IoCtx* context, size_t 
   return rc;
 }
 
-ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* callback_arg, librados::callback_t callback_func) {
-  if (offset != 0) {
+ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* callback_arg, librados::callback_t callback_func, bool write_full) {
+  if (offset != 0 && write_full) {
     log(
       (char*)"Writing to file %s rejected -- can only write full objects at offset 0, got offset %llu (block %llu)",
       name.c_str(),
@@ -245,9 +245,13 @@ ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t
   }
   try{
     //Make sure no movement is done
-    write_operations.emplace(std::piecewise_construct, std::make_tuple(block_num), std::make_tuple(input_buf, req_size, callback_arg, callback_func));
-    auto &op_data = write_operations.at(block_num);
-    rc = context->aio_write_full(obj_name, op_data.cmpl.use(), op_data.bl);
+    write_operations.emplace_back(input_buf, req_size, offset, block_num, callback_arg, callback_func);
+    auto &op_data = write_operations.back();
+    if (write_full) {
+      rc = context->aio_write_full(obj_name, op_data.cmpl.use(), op_data.bl);
+    } else {
+      rc = context->aio_write(obj_name, op_data.cmpl.use(), op_data.bl, req_size, offset);
+    }
   } catch (std::bad_alloc&) {
     log((char*)"Memory allocation failed while writing file %s async", name.c_str());
     return -ENOMEM;
@@ -255,8 +259,8 @@ ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t
   return rc;
 }
 
-ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset) {
-  if (offset != 0) {
+ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, bool write_full) {
+  if (offset != 0 && write_full) {
     log(
       (char*)"Writing (sync) to file %s rejected -- can only write full objects at offset 0, got offset %llu (block %llu)",
       name.c_str(),
@@ -273,7 +277,11 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
   }
   ceph::bufferlist bl;
   bl.append(input_buf, req_size);
-  rc = context->write_full(obj_name, bl);
+  if (write_full) {
+    rc = context->write_full(obj_name, bl);
+  } else {
+    rc = context->write(obj_name, bl, req_size, offset);
+  }
   return rc;
 }
 
