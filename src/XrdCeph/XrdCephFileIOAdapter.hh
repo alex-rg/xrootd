@@ -19,7 +19,8 @@ enum OpType {
   OP_READ,
   OP_READ_ASYNC,
   OP_WRITE_SYNC,
-  OP_WRITE_ASYNC
+  OP_WRITE_ASYNC,
+  OP_WRITE_IMPLICIT_ASYNC
 };
 
 struct readCallbackWrapperArg {
@@ -113,6 +114,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
   logfunc_pointer log_func;
 
   private:
+  bool allow_implicit_async_writes = true;
+
   //Completion pointer
   class CmplPtr {
     librados::AioCompletion *ptr;
