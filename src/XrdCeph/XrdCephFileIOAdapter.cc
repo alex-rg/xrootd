@@ -286,7 +286,13 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
 }
 
 ssize_t XrdCephFileIOAdapter::write(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset) {
-  return io_req_block_loop(context, (void*)input_buf, req_size, offset, OP_WRITE_SYNC);
+  OpType op_type;
+  if (allow_implicit_async_writes) {
+    op_type = OP_WRITE_SYNC;
+  } else {
+    op_type = OP_WRITE_IMPLICIT_ASYNC;
+  }
+  return io_req_block_loop(context, (void*)input_buf, req_size, offset, op_type);
 }
 
 ssize_t XrdCephFileIOAdapter::write_aio(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback) {
@@ -366,7 +372,11 @@ int XrdCephFileIOAdapter::io_req_block_loop(librados::IoCtx* context, void* buf,
         log((char*)"Unable to write block %u synchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
         return rc;
       }
-    } else if (OP_WRITE_ASYNC == op_type) {
+    } else if (OP_WRITE_ASYNC == op_type || OP_WRITE_IMPLICIT_ASYNC == op_type) {
+      if (OP_WRITE_IMPLICIT_ASYNC == op_type && (arg != NULL || callback != NULL)) {
+        log((char*)"Internal error: non-null callback arg/pointe for block %u, file=%s\n", start_block, name.c_str());
+	return -ERANGE;
+      }
       rc = write_block_async(context, start_block, buf_start_ptr + buf_pos, chunk_len, chunk_start, arg, callback);
       if (rc < 0) {
         log((char*)"Unable to write block %u asynchronously, rc=%d, file=%s\n", start_block, rc, name.c_str());
