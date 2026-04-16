@@ -114,7 +114,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   logfunc_pointer log_func;
 
   private:
-  bool allow_implicit_async_writes = true;
+  bool allow_implicit_async_writes = false;
 
   //Completion pointer
   class CmplPtr {
