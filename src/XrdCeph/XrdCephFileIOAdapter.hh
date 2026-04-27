@@ -8,6 +8,7 @@
 #include "XrdSys/XrdSysPthread.hh"
 
 #define MAX_ATTR_CHARS 128
+#define MAX_FILENAME_CHARS 4096
 
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
@@ -207,7 +208,7 @@ class XrdCephFileIOAdapter: public CephFileRef {
   };
 
   //int write_to_object(const char* buf_ptr, size_t cur_block, size_t chunk_len, size_t chunk_offset);
-  int get_object_name(size_t obj_idx, std::string& res);
+  std::string get_object_name(size_t obj_idx);
   int addReadRequest(size_t obj_idx, char *buffer, size_t size, off64_t offset);
   int io_req_block_loop(librados::IoCtx* context, void* buf, size_t req_size, off64_t offset, OpType op_type, void* arg=NULL, librados::callback_t callback=NULL);
   int remove_objects(librados::IoCtx* context, bool keep_first=false);
