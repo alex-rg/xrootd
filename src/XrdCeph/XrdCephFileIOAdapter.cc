@@ -147,13 +147,12 @@ int XrdCephFileIOAdapter::submit_reads_and_wait_for_complete(librados::IoCtx* co
    */
 
   for (auto &op_data: read_operations) {
-    int rval = -1;
     size_t obj_idx = op_data.first;
 
     std::string obj_name;
-    rval = get_object_name(obj_idx, obj_name);
-    if (rval) {
-      return rval;
+    obj_name = get_object_name(obj_idx);
+    if (obj_name.empty()) {
+      return -ENOMEM;
     }
 
     context->aio_operate(obj_name, op_data.second.cmpl.use(), &op_data.second.ceph_read_op, 0);
@@ -218,9 +217,9 @@ int XrdCephFileIOAdapter::read_aio(librados::IoCtx* context, void* out_buf, size
 ssize_t XrdCephFileIOAdapter::read_block_async(librados::IoCtx* context, size_t block_num, size_t req_size, off64_t offset,  readCallbackWrapperArg* arg) {
   std::string obj_name;
   ssize_t rc = 0;
-  rc = get_object_name(block_num, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(block_num);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   CmplPtr cmpl(arg, callback_wrapper);
   rc = context->aio_read(obj_name, cmpl.access(), &arg->bl, req_size, offset);
@@ -239,9 +238,9 @@ ssize_t XrdCephFileIOAdapter::write_block_async(librados::IoCtx* context, size_t
   }
   std::string obj_name;
   ssize_t rc = 0;
-  rc = get_object_name(block_num, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(block_num);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   try{
     //Make sure no movement is done
@@ -271,9 +270,9 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
   }
   std::string obj_name;
   ssize_t rc = 0;
-  rc = get_object_name(block_num, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(block_num);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   ceph::bufferlist bl;
   bl.append(input_buf, req_size);
@@ -460,9 +459,9 @@ int XrdCephFileIOAdapter::write_to_object(const char* buf_ptr, size_t cur_block,
 int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len) {
   std::string obj_name;
   int rc;
-  rc = get_object_name(0, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   ceph::bufferlist bl;
   bl.append((const char*)input_buf, len);
@@ -476,21 +475,21 @@ int XrdCephFileIOAdapter::setxattr(librados::IoCtx* context, const char* attr_na
 int XrdCephFileIOAdapter::getxattrs(librados::IoCtx* context, std::map<std::string, ceph::bufferlist>& dict) {
   std::string obj_name;
   int rc;
-  rc = get_object_name(0, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   rc = context->getxattrs(obj_name, dict);
-  return 0;
+  return rc;
 }
 
 ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* attr_name, char *output_buf, size_t buf_size) {
   int rc;
   //rc = log_xattrs(context);
   std::string obj_name;
-  rc = get_object_name(0, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   ceph::bufferlist bl;
   rc = context->getxattr(obj_name, attr_name, bl);
@@ -513,9 +512,9 @@ ssize_t XrdCephFileIOAdapter::getxattr(librados::IoCtx* context, const char* att
 
 int XrdCephFileIOAdapter::rmxattr(librados::IoCtx* context, const char* name) {
   std::string obj_name;
-  int rc = get_object_name(0, obj_name);
-  if (rc) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   return context->rmxattr(obj_name, name);
 }
@@ -552,9 +551,9 @@ int XrdCephFileIOAdapter::truncate(librados::IoCtx* context) {
     return rc;
   }
   std::string obj_name;
-  rc = get_object_name(0, obj_name);
-  if (rc != 0) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   rc = context->trunc(obj_name, 0);
   if (rc != 0) {
@@ -582,9 +581,9 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
   std::list<CmplPtr> completions;
   for (ssize_t i=obj_count-1; i>=end_object; i--) {
     std::string obj_name;
-    rc = get_object_name(i, obj_name);
-    if (rc < 0) {
-      return rc;
+    obj_name = get_object_name(i);
+    if (obj_name.empty()) {
+      return -ENOMEM;
     }
     completions.emplace_back();
     context->aio_remove(obj_name, completions.back().use());
@@ -602,9 +601,9 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
 
 int XrdCephFileIOAdapter::lock(librados::IoCtx* context, time_t lock_timeout) {
   std::string obj_name;
-  int rc = get_object_name(0, obj_name);
-  if (rc < 0) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   struct timeval tv;
   tv.tv_sec = lock_timeout;
@@ -614,12 +613,12 @@ int XrdCephFileIOAdapter::lock(librados::IoCtx* context, time_t lock_timeout) {
 
 int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
   std::string obj_name;
-  int rc = get_object_name(0, obj_name);
-  if (rc < 0) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
 
-  rc = context->unlock(obj_name, lock_name, lock_cookie);
+  int rc = context->unlock(obj_name, lock_name, lock_cookie);
   if (rc == -ENOENT) {
     //If lock has the same cookie but different client (obtained via different context)
     //we just break it
@@ -658,31 +657,32 @@ int XrdCephFileIOAdapter::unlock(librados::IoCtx* context) {
 
 int XrdCephFileIOAdapter::stat(librados::IoCtx* context, uint64_t* size, time_t* mtime) {
   std::string obj_name;
-  int rc = get_object_name(0, obj_name);
-  if (rc < 0) {
-    return rc;
+  obj_name = get_object_name(0);
+  if (obj_name.empty()) {
+    return -ENOMEM;
   }
   uint64_t tmp = 0;
-  rc = context->stat(obj_name, &tmp, mtime);
+  int rc = context->stat(obj_name, &tmp, mtime);
   *size = get_size(context);
   return rc;
 }
 
-int XrdCephFileIOAdapter::get_object_name(size_t obj_idx, std::string& res){
+std::string XrdCephFileIOAdapter::get_object_name(size_t obj_idx){
   /* Writes full object name to buf. Returns 0 on success, or negative error code on error*/
-  char object_suffix[18];
+  char object_name[18+MAX_FILENAME_CHARS];
   int sp_bytes_written;
-  sp_bytes_written = snprintf(object_suffix, sizeof(object_suffix), ".%016zx", obj_idx);
-  if (sp_bytes_written >= (int) sizeof(object_suffix)) {
-    log((char*)"Can not fit object suffix into buffer for file %s -- too big\n", name.c_str());
-    return -EFBIG;
+  std::string res = "";
+
+  sp_bytes_written = snprintf(object_name, sizeof(object_name), "%s.%016zx", name.c_str(), obj_idx);
+  if (sp_bytes_written >= (int) sizeof(object_name)) {
+    log((char*)"Can not fit object suffix into buffer for file %s -- suffix too big or name too long\n", name.c_str());
+    return res;
   }
 
   try {
-    res = name + std::string(object_suffix);
+    res = std::string(object_name);
   } catch (std::bad_alloc&) {
     log((char*)"Can not create object string for file %s)", name.c_str());
-    return -ENOMEM;
   }
-  return 0;
+  return res;
 }
