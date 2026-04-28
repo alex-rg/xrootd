@@ -805,7 +805,8 @@ off64_t ceph_posix_lseek64(int fd, off64_t offset, int whence) {
 }
 
 ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
+  return count;
+  /*XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
@@ -825,11 +826,12 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
     return count;
   } else {
     return -EBADF;
-  }
+  }*/
 }
 
 ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset) {
-  XrdCephFileIOAdapter* fr = getFileRef(fd);
+  return count;
+  /*XrdCephFileIOAdapter* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
@@ -851,7 +853,7 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     return count;
   } else {
     return -EBADF;
-  }
+  }*/
 }
 
 static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
