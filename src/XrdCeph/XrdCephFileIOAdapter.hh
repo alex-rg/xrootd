@@ -9,6 +9,7 @@
 
 #define MAX_ATTR_CHARS 128
 #define MAX_FILENAME_CHARS 4096
+#define ALLOW_PARTIAL_OBJECT_WRITES 1
 
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
@@ -98,8 +99,8 @@ class XrdCephFileIOAdapter: public CephFileRef {
   int read(librados::IoCtx* context, void *output_buf, size_t size, off64_t offset);
   int read_aio(librados::IoCtx* context, void* out_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t read_block_async(librados::IoCtx* context, size_t block_num, size_t req_size, off64_t offset,  readCallbackWrapperArg* arg);
-  ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, bool write_full=false);
-  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback, bool write_full=false);
+  ssize_t write_block_sync(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset);
+  ssize_t write_block_async(librados::IoCtx* context, size_t block_num, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t write_aio(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset, void* arg, librados::callback_t callback);
   ssize_t write(librados::IoCtx* context, const char *input_buf, size_t size, off64_t offset);
   int setxattr(librados::IoCtx* context, const char* attr_name, const char *input_buf, size_t len);
