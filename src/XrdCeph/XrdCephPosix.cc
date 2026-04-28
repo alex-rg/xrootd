@@ -600,7 +600,7 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
   struct stat buf;
   dumpClusterInfo(); // JW enhanced logging
 
-  int rc = fr.stat(context, (uint64_t*)&(buf.st_size), &(buf.st_atime)); //Get details about a file
+  int rc = -ENOENT; //fr.stat(context, (uint64_t*)&(buf.st_size), &(buf.st_atime)); //Get details about a file
   
  
   bool fileExists = (rc != -ENOENT); //Make clear what condition we are testing
@@ -685,11 +685,11 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
       }
     }
     // At this point, we know either the target file didn't exist, or the ceph_posix_unlink above removed it
-    rc = fr.lock(context);
+    /*rc = fr.lock(context);
     if (rc < 0) {
       logwrapper((char*)"Unable to lock file %s", pathname);
       return -ENOLCK;
-    }
+    }*/
     int fd = insertFileRef(fr);
     logwrapper((char*)"File descriptor %d associated to file %s opened in write mode", fd, pathname);
     return fd;
@@ -706,7 +706,7 @@ int ceph_posix_close(int fd) {
   if (fr) {
     if (! ((fr->flags & O_ACCMODE) == O_RDONLY) ) {  // Access mode is WRITE
       //Write object size to file attributes
-      rc = fr->wait_for_write_complete();
+      //rc = fr->wait_for_write_complete();
       if (rc != 0) {
         logwrapper((char*)"Can not write file %s -- %d\n", fr->name.c_str(), rc);
       }
@@ -719,7 +719,7 @@ int ceph_posix_close(int fd) {
         };
 
 
-      librados::IoCtx *ioctx = getIoCtx(*fr);
+      /*librados::IoCtx *ioctx = getIoCtx(*fr);
       if (0 == ioctx) {
         return -EINVAL;
       }
@@ -743,7 +743,7 @@ int ceph_posix_close(int fd) {
       int rc1 = fr->unlock(ioctx);
       if (rc1 != 0) {
         logwrapper((char*)"Can not unlock file %s -- got %d \n", fr->name.c_str(), rc1);
-      }
+      }*/
     }
 
     ::timeval now;
