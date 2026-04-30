@@ -10,6 +10,7 @@
 #define MAX_ATTR_CHARS 128
 #define MAX_FILENAME_CHARS 4096
 #define ALLOW_PARTIAL_OBJECT_WRITES 1
+#define ALLOW_IMPLICIT_ASYNC_WRITES 1
 
 #ifndef _XRD_CEPH_IO_FILE
 #define _XRD_CEPH_IO_FILE
@@ -116,7 +117,6 @@ class XrdCephFileIOAdapter: public CephFileRef {
   logfunc_pointer log_func;
 
   private:
-  bool allow_implicit_async_writes = false;
 
   //Completion pointer
   class CmplPtr {
