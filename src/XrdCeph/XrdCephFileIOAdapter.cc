@@ -290,11 +290,11 @@ ssize_t XrdCephFileIOAdapter::write_block_sync(librados::IoCtx* context, size_t 
 
 ssize_t XrdCephFileIOAdapter::write(librados::IoCtx* context, const char* input_buf, size_t req_size, off64_t offset) {
   OpType op_type;
-  if (allow_implicit_async_writes) {
-    op_type = OP_WRITE_IMPLICIT_ASYNC;
-  } else {
-    op_type = OP_WRITE_SYNC;
-  }
+#if defined(ALLOW_IMPLICIT_ASYNC_WRITES)
+  op_type = OP_WRITE_IMPLICIT_ASYNC;
+#else
+  op_type = OP_WRITE_SYNC;
+#endif
   return io_req_block_loop(context, (void*)input_buf, req_size, offset, op_type);
 }
 
