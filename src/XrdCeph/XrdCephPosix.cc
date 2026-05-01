@@ -123,12 +123,13 @@ unsigned int getCephPoolIdxAndIncrease() {
       }
     }
   }
-  unsigned int res = g_cephPoolIdx;
+  /*unsigned int res = g_cephPoolIdx;
   unsigned nextValue = g_cephPoolIdx+1;
   if (nextValue >= g_maxCephPoolIdx) {
     nextValue = 0;
   }
-  g_cephPoolIdx = nextValue;
+  g_cephPoolIdx = nextValue;*/
+  unsigned int res = gettid() % g_maxCephPoolIdx;
   // JW logging of accesses:
   ++g_idxCntr[res];
   return res;
