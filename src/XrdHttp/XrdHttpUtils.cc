@@ -230,7 +230,7 @@ void calcHashes(
         const char *key) {
 
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if 1 >= 2
   EVP_MAC *mac;
   EVP_MAC_CTX *ctx;
   size_t len;
@@ -256,7 +256,7 @@ void calcHashes(
     return;
   }
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if 1 >= 2
 
   mac = EVP_MAC_fetch(0, "sha256", 0);
   ctx = EVP_MAC_CTX_new(mac);
