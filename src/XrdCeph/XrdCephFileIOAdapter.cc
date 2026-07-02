@@ -582,22 +582,15 @@ int XrdCephFileIOAdapter::remove_objects(librados::IoCtx* context, bool keep_fir
   }
 
   ssize_t end_object = keep_first ? 1 : 0;
-  std::list<CmplPtr> completions;
   for (ssize_t i=obj_count-1; i>=end_object; i--) {
     std::string obj_name;
     obj_name = get_object_name(i);
     if (obj_name.empty()) {
       return -ENOMEM;
     }
-    completions.emplace_back();
-    context->aio_remove(obj_name, completions.back().use());
-  }
-  rc = 0;
-  for (auto& c: completions) {
-    c.wait_for_complete();
-    rc = std::min(rc, c.get_return_value());
-    if (rc < 0 ) {
-      log((char*)"Can not delete %s -- object deletion failed %d\n", name.c_str(),  rc);
+    rc = context->remove(obj_name);
+    if (rc < 0) {
+      break;
     }
   }
   return rc;
